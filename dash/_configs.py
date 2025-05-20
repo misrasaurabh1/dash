@@ -7,34 +7,37 @@ from ._utils import AttributeDict
 
 
 def load_dash_env_vars():
+    # Cache environ for fast lookup
+    environ = os.environ
+    vars_to_check = (
+        "DASH_APP_NAME",
+        "DASH_URL_BASE_PATHNAME",
+        "DASH_ROUTES_PATHNAME_PREFIX",
+        "DASH_REQUESTS_PATHNAME_PREFIX",
+        "DASH_SUPPRESS_CALLBACK_EXCEPTIONS",
+        "DASH_ASSETS_EXTERNAL_PATH",
+        "DASH_INCLUDE_ASSETS_FILES",
+        "DASH_COMPONENTS_CACHE_MAX_AGE",
+        "DASH_SERVE_DEV_BUNDLES",
+        "DASH_DEBUG",
+        "DASH_UI",
+        "DASH_PROPS_CHECK",
+        "DASH_HOT_RELOAD",
+        "DASH_HOT_RELOAD_INTERVAL",
+        "DASH_HOT_RELOAD_WATCH_INTERVAL",
+        "DASH_HOT_RELOAD_MAX_RETRY",
+        "DASH_SILENCE_ROUTES_LOGGING",
+        "DASH_DISABLE_VERSION_CHECK",
+        "DASH_PRUNE_ERRORS",
+        "DASH_COMPRESS",
+        "HOST",
+        "PORT",
+    )
+
     return AttributeDict(
         {
-            var: os.getenv(var, os.getenv(var.lower()))
-            for var in (
-                "DASH_APP_NAME",
-                "DASH_URL_BASE_PATHNAME",
-                "DASH_ROUTES_PATHNAME_PREFIX",
-                "DASH_REQUESTS_PATHNAME_PREFIX",
-                "DASH_SUPPRESS_CALLBACK_EXCEPTIONS",
-                "DASH_ASSETS_EXTERNAL_PATH",
-                "DASH_INCLUDE_ASSETS_FILES",
-                "DASH_COMPONENTS_CACHE_MAX_AGE",
-                "DASH_INCLUDE_ASSETS_FILES",
-                "DASH_SERVE_DEV_BUNDLES",
-                "DASH_DEBUG",
-                "DASH_UI",
-                "DASH_PROPS_CHECK",
-                "DASH_HOT_RELOAD",
-                "DASH_HOT_RELOAD_INTERVAL",
-                "DASH_HOT_RELOAD_WATCH_INTERVAL",
-                "DASH_HOT_RELOAD_MAX_RETRY",
-                "DASH_SILENCE_ROUTES_LOGGING",
-                "DASH_DISABLE_VERSION_CHECK",
-                "DASH_PRUNE_ERRORS",
-                "DASH_COMPRESS",
-                "HOST",
-                "PORT",
-            )
+            var: environ.get(var) if var in environ else environ.get(var.lower())
+            for var in vars_to_check
         }
     )
 
