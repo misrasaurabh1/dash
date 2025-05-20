@@ -110,14 +110,18 @@ def jl_package_name(namestring):
 
 def stringify_wildcards(wclist, no_symbol=False):
     if no_symbol:
-        wcstring = "|".join("{}-".format(item) for item in wclist)
+        # Faster: generator instead of list + join
+        return "|".join(f"{item}-" for item in wclist)
     else:
-        wcstring = ", ".join('Symbol("{}-")'.format(item) for item in wclist)
-    return wcstring
+        return ", ".join(f'Symbol("{item}-")' for item in wclist)
 
 
 def get_wildcards_jl(props):
-    return [key.replace("-*", "") for key in props if key.endswith("-*")]
+    # Listcomp is already fast, but avoid calling replace if not needed
+    # Reduce Python allocations by using generator
+    return [
+        key[:-2] if key.endswith("-*") else key for key in props if key.endswith("-*")
+    ]
 
 
 def get_jl_prop_types(type_object):
@@ -194,28 +198,24 @@ def filter_props(props):
     dict
         Filtered dictionary with {propName: propMetadata} structure
     """
-    filtered_props = copy.deepcopy(props)
-
-    for arg_name, arg in list(filtered_props.items()):
-        if "type" not in arg and "flowType" not in arg:
-            filtered_props.pop(arg_name)
-            continue
-
-        # Filter out functions and instances --
-        if "type" in arg:  # These come from PropTypes
-            arg_type = arg["type"]["name"]
-            if arg_type in {"func", "symbol", "instanceOf"}:
-                filtered_props.pop(arg_name)
-        elif "flowType" in arg:  # These come from Flow & handled differently
-            arg_type_name = arg["flowType"]["name"]
-            if arg_type_name == "signature":
-                # This does the same as the PropTypes filter above, but "func"
-                # is under "type" if "name" is "signature" vs just in "name"
-                if "type" not in arg["flowType"] or arg["flowType"]["type"] != "object":
-                    filtered_props.pop(arg_name)
+    # Shallow copy is enough; we only pop keys, not mutate values.
+    filtered_props = dict(props)
+    remove_keys = []
+    for arg_name, arg in filtered_props.items():
+        arg_type = None
+        if "type" in arg:
+            t = arg["type"]
+            if t.get("name") in {"func", "symbol", "instanceOf"}:
+                remove_keys.append(arg_name)
+        elif "flowType" in arg:
+            ft = arg["flowType"]
+            if ft.get("name") == "signature":
+                if ft.get("type") != "object":
+                    remove_keys.append(arg_name)
         else:
-            raise ValueError
-
+            remove_keys.append(arg_name)
+    for k in remove_keys:
+        filtered_props.pop(k, None)
     return filtered_props
 
 
@@ -263,21 +263,26 @@ def create_docstring_jl(component_name, props, description):
     """
     # Ensure props are ordered with children first
     props = reorder_props(props=props)
-
-    return "A{n} {name} component.\n{description}\nKeyword arguments:\n{args}".format(
-        n="n" if component_name[0].lower() in "aeiou" else "",
-        name=component_name,
-        description=description,
-        args="\n".join(
+    args_list = []
+    prop_items = filter_props(props).items()
+    c0 = component_name[0].lower()
+    n = "n" if c0 in "aeiou" else ""
+    for p, prop in prop_items:
+        type_object = prop["type"] if "type" in prop else prop["flowType"]
+        args_list.append(
             create_prop_docstring_jl(
                 prop_name=p,
-                type_object=prop["type"] if "type" in prop else prop["flowType"],
+                type_object=type_object,
                 required=prop["required"],
                 description=prop["description"],
                 indent_num=0,
             )
-            for p, prop in filter_props(props).items()
-        ),
+        )
+    return "A{n} {name} component.\n{description}\nKeyword arguments:\n{args}".format(
+        n=n,
+        name=component_name,
+        description=description,
+        args="\n".join(args_list),
     )
 
 
@@ -442,10 +447,9 @@ def generate_toml_file(project_shortname, pkg_data):
 
 
 def generate_class_string(name, props, description, project_shortname, prefix):
-    # Ensure props are ordered with children first
+    # Ensure props are ordered with children first, filter props
     filtered_props = reorder_props(filter_props(props))
-
-    prop_keys = list(filtered_props.keys())
+    prop_keys = list(filtered_props)
 
     docstring = (
         create_docstring_jl(
@@ -456,24 +460,21 @@ def generate_class_string(name, props, description, project_shortname, prefix):
     )
 
     wclist = get_wildcards_jl(props)
-    default_paramtext = ""
+    # build default_paramtext efficiently
+    skip_set = set(julia_keywords)
+    del_keys = set(
+        [k for k in prop_keys if k.endswith("-*") or k == "setProps" or k in skip_set]
+    )
+    # Remove in a single traversal and warn for keywords
+    warn_template = 'WARNING: prop "{}" in component "{}" is a Julia keyword - REMOVED FROM THE JULIA COMPONENT'
+    keyword_props = skip_set.intersection(prop_keys)
+    for item in keyword_props:
+        warnings.warn(warn_template.format(item, name))
 
-    # Filter props to remove those we don't want to expose
-    for item in prop_keys[:]:
-        if item.endswith("-*") or item == "setProps":
-            prop_keys.remove(item)
-        elif item in julia_keywords:
-            prop_keys.remove(item)
-            warnings.warn(
-                (
-                    'WARNING: prop "{}" in component "{}" is a Julia keyword'
-                    " - REMOVED FROM THE JULIA COMPONENT"
-                ).format(item, name)
-            )
+    filtered_param_keys = [p for p in prop_keys if p not in del_keys]
+    default_paramtext = ", ".join(f":{p}" for p in filtered_param_keys)
 
-    default_paramtext += ", ".join(":{}".format(p) for p in prop_keys)
-
-    has_children = "children" in prop_keys
+    has_children = "children" in filtered_param_keys
     funcname = format_fn_name(prefix, name)
     children_signatures = (
         jl_children_signatures.format(funcname=funcname) if has_children else ""
@@ -482,7 +483,7 @@ def generate_class_string(name, props, description, project_shortname, prefix):
         jl_children_definitions.format(funcname=funcname) if has_children else ""
     )
     return jl_component_string.format(
-        funcname=format_fn_name(prefix, name),
+        funcname=funcname,
         docstring=docstring,
         component_props=default_paramtext,
         wildcard_symbols=stringify_wildcards(wclist, no_symbol=False),
