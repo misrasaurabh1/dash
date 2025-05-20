@@ -118,8 +118,13 @@ class text_to_equal:
 
     def message(self, driver):
         try:
-            element = self._get_element(driver)
-            text = "found: " + str(element.text) or str(element.get_attribute("value"))
+            # Inline _get_element for speed
+            element = driver.find_element(By.CSS_SELECTOR, self.selector)
+            # Prefer .text, fallback to value, avoid redundant str() and attribute calls
+            element_text = element.text
+            if not element_text:
+                element_text = element.get_attribute("value")
+            text = f"found: {element_text}"
         except WebDriverException:
             text = f"{self.selector} not found"
         return f"text -> {self.text} not found within {self.timeout}s, {text}"
