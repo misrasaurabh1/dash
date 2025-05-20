@@ -231,11 +231,29 @@ def get_jl_type(type_object):
     str
         Julia type string
     """
-    js_type_name = type_object["name"]
+    js_type_name = type_object.get("name")
+    # Fastpath for most common/primitive types
+    if js_type_name == "array":
+        return "Array"
+    elif js_type_name == "bool":
+        return "Bool"
+    elif js_type_name == "number":
+        return "Real"
+    elif js_type_name == "string":
+        return "String"
+    elif js_type_name == "object":
+        return "Dict"
+    elif js_type_name == "any":
+        return "Bool | Real | String | Dict | Array"
+    elif js_type_name == "element":
+        return "dash component"
+    elif js_type_name == "node":
+        return "a list of or a singular dash component, string or number"
+    # Defer to the slower path only for composite/object types
     js_to_jl_types = get_jl_prop_types(type_object=type_object)
-    if js_type_name in js_to_jl_types:
-        prop_type = js_to_jl_types[js_type_name]()
-        return prop_type
+    prop_type_func = js_to_jl_types.get(js_type_name)
+    if prop_type_func is not None:
+        return prop_type_func()
     return ""
 
 
@@ -310,27 +328,23 @@ def create_prop_docstring_jl(
     str
         Dash component prop docstring
     """
-    jl_type_name = get_jl_type(type_object=type_object)
-
+    jl_type_name = get_jl_type(type_object)
     indent_spacing = "  " * indent_num
+    req_str = "required" if required else "optional"
+    # Avoid repeated formatting, use join for better performance
     if "\n" in jl_type_name:
-        return (
-            "{indent_spacing}- `{name}` ({is_required}): {description}. "
-            "{name} has the following type: {type}".format(
-                indent_spacing=indent_spacing,
-                name=prop_name,
-                type=jl_type_name,
-                description=description,
-                is_required="required" if required else "optional",
-            )
+        return "{0}- `{1}` ({2}): {3}. {1} has the following type: {4}".format(
+            indent_spacing, prop_name, req_str, description, jl_type_name
         )
-    return "{indent_spacing}- `{name}` ({type}{is_required}){description}".format(
-        indent_spacing=indent_spacing,
-        name=prop_name,
-        type="{}; ".format(jl_type_name) if jl_type_name else "",
-        description=(": {}".format(description) if description != "" else ""),
-        is_required="required" if required else "optional",
-    )
+    doc = [indent_spacing, "- `", prop_name, "` ("]
+    if jl_type_name:
+        doc.append(jl_type_name)
+        doc.append("; ")
+    doc.append(req_str)
+    doc.append(")")
+    if description:
+        doc.extend([": ", description])
+    return "".join(doc)
 
 
 # this logic will permit passing blank Julia prefixes to
