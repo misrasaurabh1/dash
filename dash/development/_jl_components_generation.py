@@ -104,8 +104,9 @@ core_packages = ["dash_html_components", "dash_core_components", "dash_table"]
 
 
 def jl_package_name(namestring):
-    s = namestring.split("_")
-    return "".join(w.capitalize() for w in s)
+    # Use local variable for function lookup, splits and joins in one line, and capitalize using str.capitalize, which is fast
+    capitalize = str.capitalize
+    return "".join(map(capitalize, namestring.split("_")))
 
 
 def stringify_wildcards(wclist, no_symbol=False):
