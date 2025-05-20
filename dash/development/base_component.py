@@ -132,6 +132,7 @@ class Component(metaclass=ComponentMeta):
         for k, v in list(kwargs.items()):
             # pylint: disable=no-member
             k_in_propnames = k in self._prop_names
+            # Optimize: if _valid_wildcard_attributes is big, don't build any() each time. Not worth for only a few.
             k_in_wildcards = any(
                 k.startswith(w) for w in self._valid_wildcard_attributes
             )
@@ -238,29 +239,36 @@ class Component(metaclass=ComponentMeta):
 
     def to_plotly_json(self):
         # Add normal properties
-        props = {
-            p: getattr(self, p)
-            for p in self._prop_names  # pylint: disable=no-member
-            if hasattr(self, p)
-        }
+        dict_ref = self.__dict__
+        # Avoid getattr except for dynamically set properties (rare, most common case: literal properties set via __init__)
+        prop_names = self._prop_names
+        props = {}
+        for p in prop_names:
+            if p in dict_ref:
+                props[p] = dict_ref[p]
+            elif hasattr(self, p):  # Fallback for property or @property descriptors
+                props[p] = getattr(self, p)
+        # --- Optimization: Precompute tuple for startswith matching
+        wc_attrs = getattr(self, "_valid_wildcard_attributes", None)
+        if wc_attrs and not isinstance(wc_attrs, tuple):
+            # Convert once
+            wc_attrs_tuple = tuple(wc_attrs)
+            self._valid_wildcard_attributes = wc_attrs_tuple
+        else:
+            wc_attrs_tuple = wc_attrs
+
         # Add the wildcard properties data-* and aria-*
-        props.update(
-            {
-                k: getattr(self, k)
-                for k in self.__dict__
-                if any(
-                    k.startswith(w)
-                    # pylint:disable=no-member
-                    for w in self._valid_wildcard_attributes
-                )
-            }
-        )
+        # --- Optimization: use tuple startswith for better perf, only one call per key.
+        if wc_attrs_tuple:
+            for k, v in dict_ref.items():
+                if k.startswith(wc_attrs_tuple):
+                    props[k] = v
+
         as_json = {
             "props": props,
             "type": self._type,  # pylint: disable=no-member
             "namespace": self._namespace,  # pylint: disable=no-member
         }
-
         return as_json
 
     # pylint: disable=too-many-branches, too-many-return-statements
