@@ -467,15 +467,13 @@ def _explicitize_args(func):
     def wrapper(*args, **kwargs):
         if "_explicit_args" in kwargs:
             raise Exception("Variable _explicit_args should not be set.")
-        kwargs["_explicit_args"] = list(
-            set(list(varnames[: len(args)]) + [k for k, _ in kwargs.items()])
-        )
-        if "self" in kwargs["_explicit_args"]:
-            kwargs["_explicit_args"].remove("self")
+        # Avoid redundant list(set(...+...)) and use set.update for efficiency
+        explicit_args = set(varnames[: len(args)])
+        explicit_args.update(kwargs.keys())
+        explicit_args.discard("self")
+        kwargs["_explicit_args"] = list(explicit_args)
         return func(*args, **kwargs)
 
-    new_sig = inspect.signature(wrapper).replace(
-        parameters=list(inspect.signature(func).parameters.values())
-    )
-    wrapper.__signature__ = new_sig  # type: ignore[reportFunctionMemberAccess]
+    # Set signature once, at decoration-time
+    wrapper.__signature__ = inspect.signature(func)
     return wrapper
