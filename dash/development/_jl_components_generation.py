@@ -194,29 +194,25 @@ def filter_props(props):
     dict
         Filtered dictionary with {propName: propMetadata} structure
     """
-    filtered_props = copy.deepcopy(props)
-
-    for arg_name, arg in list(filtered_props.items()):
-        if "type" not in arg and "flowType" not in arg:
-            filtered_props.pop(arg_name)
-            continue
-
-        # Filter out functions and instances --
-        if "type" in arg:  # These come from PropTypes
+    # Dict comprehension avoids copying unnecessary data and is faster
+    def include_prop(arg):
+        if "type" in arg:
             arg_type = arg["type"]["name"]
-            if arg_type in {"func", "symbol", "instanceOf"}:
-                filtered_props.pop(arg_name)
-        elif "flowType" in arg:  # These come from Flow & handled differently
+            return arg_type not in {"func", "symbol", "instanceOf"}
+        elif "flowType" in arg:
             arg_type_name = arg["flowType"]["name"]
             if arg_type_name == "signature":
-                # This does the same as the PropTypes filter above, but "func"
-                # is under "type" if "name" is "signature" vs just in "name"
-                if "type" not in arg["flowType"] or arg["flowType"]["type"] != "object":
-                    filtered_props.pop(arg_name)
-        else:
-            raise ValueError
+                # Only keep if "type" is present and is "object"
+                return "type" in arg["flowType"] and arg["flowType"]["type"] == "object"
+            return True
+        return False
 
-    return filtered_props
+    # Only retain those keys where a "type" or "flowType" is present AND not filtered out
+    return {
+        k: v
+        for k, v in props.items()
+        if (("type" in v or "flowType" in v) and include_prop(v))
+    }
 
 
 def get_jl_type(type_object):
@@ -262,22 +258,23 @@ def create_docstring_jl(component_name, props, description):
         Dash component docstring
     """
     # Ensure props are ordered with children first
-    props = reorder_props(props=props)
+    ordered_props = reorder_props(props=props)
+    filtered_props = filter_props(ordered_props)
 
+    args = "\n".join(
+        create_prop_docstring_jl(
+            prop_name=p,
+            type_object=prop["type"] if "type" in prop else prop["flowType"],
+            required=prop["required"],
+            description=prop["description"],
+            indent_num=0,
+        )
+        for p, prop in filtered_props.items()
+    )
+
+    n = "n" if component_name and component_name[0].lower() in "aeiou" else ""
     return "A{n} {name} component.\n{description}\nKeyword arguments:\n{args}".format(
-        n="n" if component_name[0].lower() in "aeiou" else "",
-        name=component_name,
-        description=description,
-        args="\n".join(
-            create_prop_docstring_jl(
-                prop_name=p,
-                type_object=prop["type"] if "type" in prop else prop["flowType"],
-                required=prop["required"],
-                description=prop["description"],
-                indent_num=0,
-            )
-            for p, prop in filter_props(props).items()
-        ),
+        n=n, name=component_name, description=description, args=args
     )
 
 
@@ -327,8 +324,8 @@ def create_prop_docstring_jl(
     return "{indent_spacing}- `{name}` ({type}{is_required}){description}".format(
         indent_spacing=indent_spacing,
         name=prop_name,
-        type="{}; ".format(jl_type_name) if jl_type_name else "",
-        description=(": {}".format(description) if description != "" else ""),
+        type=f"{jl_type_name}; " if jl_type_name else "",
+        description=f": {description}" if description else "",
         is_required="required" if required else "optional",
     )
 
