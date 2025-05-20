@@ -290,8 +290,10 @@ def clean_property_name(name: str):
 def hooks_to_js_object(hooks: Union[RendererHooks, None]) -> str:
     if hooks is None:
         return ""
-    hook_str = ",".join(f"{key}: {val}" for key, val in hooks.items())
-
+    items = hooks.items()
+    # Use a list comprehension for improved performance in join
+    hook_list = [f"{key}: {val}" for key, val in items]
+    hook_str = ",".join(hook_list)
     return f"{{{hook_str}}}"
 
 
