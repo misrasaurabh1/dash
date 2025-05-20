@@ -344,23 +344,45 @@ def format_fn_name(prefix, name):
 
 
 def generate_metadata_strings(resources, metatype):
-    def nothing_or_string(v):
-        return '"{}"'.format(v) if v else "nothing"
+    # Inline the logic for nothing_or_string for efficiency
+    jl_fmt = jl_resource_tuple_string
+    str_lower = str.lower
 
-    return [
-        jl_resource_tuple_string.format(
-            relative_package_path=nothing_or_string(
-                resource.get("relative_package_path", "")
-            ),
-            external_url=nothing_or_string(resource.get("external_url", "")),
-            dynamic=str(resource.get("dynamic", "nothing")).lower(),
-            type=metatype,
-            async_string=":{}".format(str(resource.get("async")).lower())
-            if "async" in resource.keys()
-            else "nothing",
+    result = []
+    append_result = result.append
+
+    for resource in resources:
+        # Local fastpaths vs repeated calls:
+        r_get = resource.get
+
+        relative_package_path_v = r_get("relative_package_path", "")
+        external_url_v = r_get("external_url", "")
+
+        # nothing_or_string inlined:
+        rel_pkg_val = (
+            f'"{relative_package_path_v}"' if relative_package_path_v else "nothing"
         )
-        for resource in resources
-    ]
+        external_url_val = f'"{external_url_v}"' if external_url_v else "nothing"
+
+        dynamic_val = str_lower(str(r_get("dynamic", "nothing")))
+
+        # check key via 'in' for dict, faster than .keys()
+        if "async" in resource:
+            async_val = f':{str_lower(str(r_get("async")))}'
+        else:
+            async_val = "nothing"
+
+        # Use dict for format_map for slightly faster lookup
+        fmt_dict = {
+            "relative_package_path": rel_pkg_val,
+            "external_url": external_url_val,
+            "dynamic": dynamic_val,
+            "type": metatype,
+            "async_string": async_val,
+        }
+
+        append_result(jl_fmt.format_map(fmt_dict))
+    return result
 
 
 def is_core_package(project_shortname):
