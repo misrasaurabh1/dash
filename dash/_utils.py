@@ -256,6 +256,7 @@ def gen_salt(chars):
 class OrderedSet(abc.MutableSet):
     def __init__(self, *args):
         self._data = []
+        self._set = set()
         for i in args:
             self.add(i)
 
