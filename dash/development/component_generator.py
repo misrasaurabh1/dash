@@ -281,15 +281,19 @@ def cli():
 
 # pylint: disable=undefined-variable
 def byteify(input_object):
-    if isinstance(input_object, dict):
-        return OrderedDict(
-            [(byteify(key), byteify(value)) for key, value in input_object.items()]
-        )
-    if isinstance(input_object, list):
-        return [byteify(element) for element in input_object]
+    # Fastest check for str first (since str is also iterable)
     if isinstance(input_object, str):  # noqa:F821
-        return input_object.encode(encoding="utf-8")
-    return input_object
+        return input_object.encode()
+    elif isinstance(input_object, dict):
+        # Avoid list intermediate; generator expression for OrderedDict
+        return OrderedDict(
+            (byteify(key), byteify(value)) for key, value in input_object.items()
+        )
+    elif isinstance(input_object, list):
+        # Pre-allocate list size for faster append
+        return [byteify(element) for element in input_object]
+    else:
+        return input_object
 
 
 if __name__ == "__main__":
