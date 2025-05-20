@@ -339,7 +339,8 @@ def create_prop_docstring_jl(
 # is supplied, leave it as-is
 def format_fn_name(prefix, name):
     if prefix:
-        return "{}_{}".format(prefix, name.lower())
+        # Use f-string for faster formatting
+        return f"{prefix}_{name.lower()}"
     return name.lower()
 
 
