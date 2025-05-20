@@ -296,7 +296,7 @@ def hooks_to_js_object(hooks: Union[RendererHooks, None]) -> str:
 
 
 def parse_version(version):
-    return tuple(int(s) for s in version.split("."))
+    return tuple(map(int, version.split(".")))
 
 
 def get_caller_name():
