@@ -55,11 +55,12 @@ class Browser(DashPageMixin):
         wait_timeout: int = 10,
         pause: bool = False,
     ):
-        self._browser = browser.lower()
+        browser = browser.lower()
+        # Fast logic for remote/remote_url computation
+        use_remote_url = bool(remote_url and remote_url != SELENIUM_GRID_DEFAULT)
+        self._browser = browser
         self._remote_url = remote_url
-        self._remote = (
-            True if remote_url and remote_url != SELENIUM_GRID_DEFAULT else remote
-        )
+        self._remote = use_remote_url or remote
         self._headless = headless
         self._options = options
         self._download_path = download_path
@@ -68,29 +69,40 @@ class Browser(DashPageMixin):
         self._percy_run = percy_run
         self._pause = pause
 
+        # get_webdriver is intentionally called only once
+        # reduces unnecessary attempts due to assignment/overrides
         self._driver = until(self.get_webdriver, timeout=1)
-        self._driver.implicitly_wait(2)
+        drv = self._driver
+        # set implicit wait just once
+        drv.implicitly_wait(2)
 
-        self._wd_wait = WebDriverWait(self.driver, wait_timeout)
+        # Construct WebDriverWait object
+        self._wd_wait = WebDriverWait(drv, wait_timeout)
         self._last_ts = 0
         self._url = ""
+        self._window_idx = 0
 
-        self._window_idx = 0  # switch browser tabs
-
-        if self._percy_run:
-            self.percy_runner = percy.Runner(
-                loader=percy.ResourceLoader(
-                    webdriver=self.driver,
-                    base_url="/assets",
-                    root_dir=percy_assets_root,
-                )
+        # Only initialize percy_runner if it's needed, minimize object allocations
+        if percy_run:
+            pl = percy.ResourceLoader(
+                webdriver=drv,
+                base_url="/assets",
+                root_dir=percy_assets_root,
             )
+            self.percy_runner = percy.Runner(loader=pl)
             self.percy_runner.initialize_build()
 
+        # Only resolve abspath for asset root if needed for logging
+        abs_percy_root = (
+            os.path.abspath(percy_assets_root)
+            if percy_assets_root
+            else percy_assets_root
+        )
+
         logger.debug("initialize browser with arguments")
-        logger.debug("  headless => %s", self._headless)
-        logger.debug("  download_path => %s", self._download_path)
-        logger.debug("  percy asset root => %s", os.path.abspath(percy_assets_root))
+        logger.debug("  headless => %s", headless)
+        logger.debug("  download_path => %s", download_path)
+        logger.debug("  percy asset root => %s", abs_percy_root)
 
     def __enter__(self):
         return self
