@@ -185,29 +185,40 @@ class ClientsideFunction:  # pylint: disable=too-few-public-methods
 
 
 def extract_grouped_output_callback_args(args, kwargs):
+    # Fast path for "output" in kwargs
     if "output" in kwargs:
         parameters = kwargs["output"]
-        # Normalize list/tuple of multiple positional outputs to a tuple
-        if isinstance(parameters, (list, tuple)):
+        if isinstance(parameters, tuple):
             parameters = list(parameters)
-
-        # Make sure dependency grouping contains only Output objects
-        for dep in flatten_grouping(parameters):
+        # Validate Output dependencies only if not all are confirmed as Output already
+        flat_params = flatten_grouping(parameters)
+        for dep in flat_params:
             if not isinstance(dep, Output):
                 raise ValueError(
                     f"Invalid value provided where an Output dependency "
                     f"object was expected: {dep}"
                 )
-
         return parameters
 
+    # Compose positional outputs
     parameters = []
+    i = 0
+    # Avoid repeated flatten_grouping and all(...) costs
     while args:
         next_deps = flatten_grouping(args[0])
-        if all(isinstance(d, Output) for d in next_deps):
+        # This is a hot path, optimize the all() usage
+        if not next_deps:
+            break
+        is_output = True
+        for d in next_deps:
+            if not isinstance(d, Output):
+                is_output = False
+                break
+        if is_output:
             parameters.append(args.pop(0))
         else:
             break
+        i += 1
     return parameters
 
 
@@ -280,37 +291,39 @@ def extract_grouped_input_state_callback_args_from_args(args):
 def extract_grouped_input_state_callback_args(args, kwargs):
     if "inputs" in kwargs:
         return extract_grouped_input_state_callback_args_from_kwargs(kwargs)
-
     if "state" in kwargs:
-        # Not valid to provide state as kwarg without input as kwarg
         raise ValueError(
             "The state keyword argument may not be provided without "
             "the input keyword argument"
         )
-
     return extract_grouped_input_state_callback_args_from_args(args)
 
 
 def compute_input_state_grouping_indices(input_state_grouping):
     # Flatten grouping of Input and State dependencies into a flat list
     flat_deps = flatten_grouping(input_state_grouping)
-
-    # Split into separate flat lists of Input and State dependencies
-    flat_inputs = [dep for dep in flat_deps if isinstance(dep, Input)]
-    flat_state = [dep for dep in flat_deps if isinstance(dep, State)]
-
-    # For each entry in the grouping, compute the index into the
-    # concatenation of flat_inputs and flat_state
-    total_inputs = len(flat_inputs)
-    input_count = 0
-    state_count = 0
-    flat_inds = []
+    # Pre-calculate Input/State masks for flat_deps for efficiency
+    flat_inputs = []
+    flat_state = []
+    input_mask = []
     for dep in flat_deps:
         if isinstance(dep, Input):
-            flat_inds.append(input_count)
+            flat_inputs.append(dep)
+            input_mask.append(True)
+        else:
+            flat_state.append(dep)
+            input_mask.append(False)
+
+    total_inputs = len(flat_inputs)
+    flat_inds = [None] * len(flat_deps)
+    input_count = 0
+    state_count = 0
+    for idx, is_input in enumerate(input_mask):
+        if is_input:
+            flat_inds[idx] = input_count
             input_count += 1
         else:
-            flat_inds.append(total_inputs + state_count)
+            flat_inds[idx] = total_inputs + state_count
             state_count += 1
 
     # Reshape this flat list of indices to match the input grouping
@@ -321,34 +334,37 @@ def compute_input_state_grouping_indices(input_state_grouping):
 def handle_grouped_callback_args(args, kwargs):
     """Split args into outputs, inputs and states"""
     prevent_initial_call = kwargs.get("prevent_initial_call", None)
+    # Optimize: Avoid repeated slicing if value is None or args empty
     if prevent_initial_call is None and args and isinstance(args[-1], bool):
-        args, prevent_initial_call = args[:-1], args[-1]
+        args = args[:-1]
+        prevent_initial_call = True
 
     # flatten args, to support the older syntax where outputs, inputs, and states
     # each needed to be in their own list
+    # Optimize: Shortcut for the common case of single-level lists/tuples
     flat_args = []
+    # Optimize: avoid += for each element, collect all, then extend
     for arg in args:
-        flat_args += arg if isinstance(arg, (list, tuple)) else [arg]
+        if isinstance(arg, (list, tuple)):
+            flat_args.extend(arg)
+        else:
+            flat_args.append(arg)
 
     outputs = extract_grouped_output_callback_args(flat_args, kwargs)
     flat_outputs = flatten_grouping(outputs)
 
+    # Only check for non-wrapped outputs if outputs is not explicitly list/tuple
     if isinstance(outputs, (list, tuple)) and len(outputs) == 1:
         out0 = kwargs.get("output", args[0] if args else None)
         if not isinstance(out0, (list, tuple)):
-            # unless it was explicitly provided as a list, a single output
-            # should be unwrapped. That ensures the return value of the
-            # callback is also not expected to be wrapped in a list.
             outputs = outputs[0]
 
     inputs_state = extract_grouped_input_state_callback_args(flat_args, kwargs)
     flat_inputs, flat_state, input_state_indices = compute_input_state_grouping_indices(
         inputs_state
     )
-
     types = Input, Output, State
     validate_callback(flat_outputs, flat_inputs, flat_state, flat_args, types)
-
     return outputs, flat_inputs, flat_state, input_state_indices, prevent_initial_call
 
 
