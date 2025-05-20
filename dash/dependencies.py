@@ -212,50 +212,66 @@ def extract_grouped_output_callback_args(args, kwargs):
 
 
 def extract_grouped_input_state_callback_args_from_kwargs(kwargs):
+    # Fetch inputs and possible state from kwargs
     input_parameters = kwargs["inputs"]
-    if isinstance(input_parameters, DashDependency):
-        input_parameters = [input_parameters]
-
     state_parameters = kwargs.get("state", None)
-    if isinstance(state_parameters, DashDependency):
-        state_parameters = [state_parameters]
 
-    if isinstance(input_parameters, dict):
+    # Fast path: minimize isinstance calls by getting type info once
+    input_type = type(input_parameters)
+    state_type = type(state_parameters)
+
+    # Normalize DashDependency single-item case
+    if input_type is DashDependency:
+        input_parameters = [input_parameters]
+        input_type = list
+    if state_type is DashDependency:
+        state_parameters = [state_parameters]
+        state_type = list
+
+    if input_type is dict:
         # Wrapped function will be called with named keyword arguments
         if state_parameters:
-            if not isinstance(state_parameters, dict):
+            if state_type is not dict:
                 raise ValueError(
                     "The input argument to app.callback was a dict, "
                     "but the state argument was not.\n"
                     "input and state arguments must have the same type"
                 )
-
-            # Merge into state dependencies
-            parameters = state_parameters
-            parameters.update(input_parameters)
+            # Merge into state dependencies, create a new dict (do not update in-place)
+            return {**state_parameters, **input_parameters}
         else:
-            parameters = input_parameters
+            return input_parameters
 
-        return parameters
-
-    if isinstance(input_parameters, (list, tuple)):
+    if input_type is list or input_type is tuple:
         # Wrapped function will be called with positional arguments
-        parameters = list(input_parameters)
-        if state_parameters:
-            if not isinstance(state_parameters, (list, tuple)):
+        if not state_parameters:
+            # Only input_parameters, make a shallow copy if it's a list for safety
+            return (
+                list(input_parameters) if input_type is not list else input_parameters
+            )
+        else:
+            if state_type is not list and state_type is not tuple:
                 raise ValueError(
                     "The input argument to app.callback was a list, "
                     "but the state argument was not.\n"
                     "input and state arguments must have the same type"
                 )
+            # Fast concatenation without unnecessary list conversions
+            if input_type is list:
+                if state_type is list:
+                    return input_parameters + state_parameters
+                else:  # state is tuple
+                    return input_parameters + list(state_parameters)
+            else:  # input is tuple
+                if state_type is list:
+                    return list(input_parameters) + state_parameters
+                else:
+                    return list(input_parameters) + list(state_parameters)
 
-            parameters += list(state_parameters)
-
-        return parameters
-
+    # If we reach here, type is not supported
     raise ValueError(
         "The input argument to app.callback may be a dict, list, or tuple,\n"
-        f"but received value of type {type(input_parameters)}"
+        f"but received value of type {input_type}"
     )
 
 
