@@ -109,10 +109,11 @@ def jl_package_name(namestring):
 
 
 def stringify_wildcards(wclist, no_symbol=False):
+    # Use f-strings for faster string formatting
     if no_symbol:
-        wcstring = "|".join("{}-".format(item) for item in wclist)
+        wcstring = "|".join([f"{item}-" for item in wclist])
     else:
-        wcstring = ", ".join('Symbol("{}-")'.format(item) for item in wclist)
+        wcstring = ", ".join([f'Symbol("{item}-")' for item in wclist])
     return wcstring
 
 
