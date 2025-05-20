@@ -194,29 +194,27 @@ def filter_props(props):
     dict
         Filtered dictionary with {propName: propMetadata} structure
     """
-    filtered_props = copy.deepcopy(props)
-
-    for arg_name, arg in list(filtered_props.items()):
-        if "type" not in arg and "flowType" not in arg:
-            filtered_props.pop(arg_name)
+    filtered = {}
+    for arg_name, arg in props.items():
+        has_type = "type" in arg
+        has_flow_type = "flowType" in arg
+        if not has_type and not has_flow_type:
             continue
 
-        # Filter out functions and instances --
-        if "type" in arg:  # These come from PropTypes
+        if has_type:
             arg_type = arg["type"]["name"]
             if arg_type in {"func", "symbol", "instanceOf"}:
-                filtered_props.pop(arg_name)
-        elif "flowType" in arg:  # These come from Flow & handled differently
+                continue
+        elif has_flow_type:
             arg_type_name = arg["flowType"]["name"]
             if arg_type_name == "signature":
-                # This does the same as the PropTypes filter above, but "func"
-                # is under "type" if "name" is "signature" vs just in "name"
                 if "type" not in arg["flowType"] or arg["flowType"]["type"] != "object":
-                    filtered_props.pop(arg_name)
+                    continue
         else:
             raise ValueError
 
-    return filtered_props
+        filtered[arg_name] = arg
+    return filtered
 
 
 def get_jl_type(type_object):
