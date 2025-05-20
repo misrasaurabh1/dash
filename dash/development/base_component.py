@@ -136,9 +136,13 @@ class Component(metaclass=ComponentMeta):
             k_in_wildcards = any(
                 k.startswith(w) for w in self._valid_wildcard_attributes
             )
+            # e.g. "The dash_core_components.Dropdown component (version 1.6.0)
+            # with the ID "my-dropdown"
             id_suffix = f' with the ID "{kwargs["id"]}"' if "id" in kwargs else ""
             try:
+                # Get fancy error strings that have the version numbers
                 error_string_prefix = "The `{}.{}` component (version {}){}"
+                # These components are part of dash now, so extract the dash version:
                 dash_packages = {
                     "dash_html_components": "html",
                     "dash_core_components": "dcc",
@@ -152,6 +156,7 @@ class Component(metaclass=ComponentMeta):
                         id_suffix,
                     )
                 else:
+                    # Otherwise import the package and extract the version number
                     error_string_prefix = error_string_prefix.format(
                         self._namespace,
                         self._type,
@@ -159,6 +164,8 @@ class Component(metaclass=ComponentMeta):
                         id_suffix,
                     )
             except ImportError:
+                # Our tests create mock components with libraries that
+                # aren't importable
                 error_string_prefix = f"The `{self._type}` component{id_suffix}"
 
             if not k_in_propnames and not k_in_wildcards:
@@ -232,8 +239,6 @@ class Component(metaclass=ComponentMeta):
 
     def to_plotly_json(self):
         # Add normal properties
-        # --- Optimization: Use self.__dict__ for fast lookup, batch-get props from _prop_names
-        # Only gather those that exist in self.__dict__ (since hasattr is much slower)
         dict_ref = self.__dict__
         # Avoid getattr except for dynamically set properties (rare, most common case: literal properties set via __init__)
         prop_names = self._prop_names
@@ -259,7 +264,6 @@ class Component(metaclass=ComponentMeta):
                 if k.startswith(wc_attrs_tuple):
                     props[k] = v
 
-        # No change below
         as_json = {
             "props": props,
             "type": self._type,  # pylint: disable=no-member
