@@ -284,7 +284,7 @@ def coerce_to_list(obj):
 
 
 def clean_property_name(name: str):
-    return name.split("@")[0]
+    return name.partition("@")[0]
 
 
 def hooks_to_js_object(hooks: Union[RendererHooks, None]) -> str:
