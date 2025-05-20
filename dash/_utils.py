@@ -178,22 +178,37 @@ def split_callback_id(callback_id):
 
 
 def stringify_id(id_) -> str:
-    def _json(k, v):
-        vstr = v.to_json() if hasattr(v, "to_json") else json.dumps(v)
-        return f"{json.dumps(k)}:{vstr}"
-
-    if isinstance(id_, dict):
-        return "{" + ",".join(_json(k, id_[k]) for k in sorted(id_)) + "}"
-    return id_
+    # Fast-path: Not a dict, just return as is
+    if not isinstance(id_, dict):
+        return id_
+    # Predefine these locally for speed
+    dumps = json.dumps
+    items = id_.items()
+    # Use sorted keys for deterministic output
+    pairs = []
+    for k in sorted(id_):
+        v = id_[k]
+        vstr = v.to_json() if hasattr(v, "to_json") else dumps(v)
+        pairs.append(f"{dumps(k)}:{vstr}")
+    return "{" + ",".join(pairs) + "}"
 
 
 def inputs_to_dict(inputs_list):
+    # Use local var for AttributeDict lookup only once (AttributeDict must be defined in global/global-import)
     inputs = AttributeDict()
+    # Avoid isinstance in every inner loop by flattening the observation
+    extend = list.extend
+    flattened = []
     for i in inputs_list:
-        inputsi = i if isinstance(i, list) else [i]
-        for ii in inputsi:
-            id_str = stringify_id(ii["id"])
-            inputs[f'{id_str}.{ii["property"]}'] = ii.get("value")
+        if isinstance(i, list):
+            extend(flattened, i)
+        else:
+            flattened.append(i)
+    # Predefine locals for speed
+    s_id = stringify_id
+    for ii in flattened:
+        id_str = s_id(ii["id"])
+        inputs[f'{id_str}.{ii["property"]}'] = ii.get("value")
     return inputs
 
 
