@@ -139,6 +139,8 @@ def create_callback_id(output, inputs, no_output=False):
     # A single dot within a dict id key or value is OK
     # but in case of multiple dots together escape each dot
     # with `\` so we don't mistake it for multi-outputs
+
+    # Pre-hash inputs string so it is done at most once per call
     hashed_inputs = None
 
     def _hash_inputs():
@@ -146,23 +148,32 @@ def create_callback_id(output, inputs, no_output=False):
             ".".join(str(x) for x in inputs).encode("utf-8")
         ).hexdigest()
 
-    def _concat(x):
-        nonlocal hashed_inputs
-        _id = x.component_id_str().replace(".", "\\.") + "." + x.component_property
+    # Faster escaping using .replace inline, no nonlocal mutation
+    def _concat(x, hashed=None):
+        cid = x.component_id_str().replace(".", "\\.")
+        prop = x.component_property
         if x.allow_duplicate:
-            if not hashed_inputs:
-                hashed_inputs = _hash_inputs()
+            if hashed is None:
+                hashed = _hash_inputs()
             # Actually adds on the property part.
-            _id += f"@{hashed_inputs}"
-        return _id
+            return f"{cid}.{prop}@{hashed}"
+        else:
+            return f"{cid}.{prop}"
 
+    # Shortcut when no_output: hash inputs only
     if no_output:
-        # No output will hash the inputs.
         return _hash_inputs()
 
+    # Multi-output fast path: build all pieces, hash once as needed
     if isinstance(output, (list, tuple)):
-        return ".." + "...".join(_concat(x) for x in output) + ".."
+        # Only hash ONCE if any outputs need it. This avoids nonlocal/ref/closure overhead.
+        needs_hash = any(x.allow_duplicate for x in output)
+        _hashed = _hash_inputs() if needs_hash else None
+        # Build the list *once*, use precomputed hash (fast path if none have allow_duplicate)
+        lst = [_concat(x, _hashed) for x in output]
+        return f"..{'...'.join(lst)}.."
 
+    # Single output: supply hash only if needed
     return _concat(output)
 
 
