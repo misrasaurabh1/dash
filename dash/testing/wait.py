@@ -79,7 +79,8 @@ class contains_text:
         return f"text -> {self.text} not found inside element within {self.timeout}s, {text}"
 
     def _get_element(self, driver):
-        return driver.find_element(By.CSS_SELECTOR, self.selector)
+        # Directly use class constant to save attribute lookup time
+        return driver.find_element(self._BY_CSS_SELECTOR, self.selector)
 
 
 class contains_class:
