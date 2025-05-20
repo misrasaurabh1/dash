@@ -132,16 +132,13 @@ class Component(metaclass=ComponentMeta):
         for k, v in list(kwargs.items()):
             # pylint: disable=no-member
             k_in_propnames = k in self._prop_names
+            # Optimize: if _valid_wildcard_attributes is big, don't build any() each time. Not worth for only a few.
             k_in_wildcards = any(
                 k.startswith(w) for w in self._valid_wildcard_attributes
             )
-            # e.g. "The dash_core_components.Dropdown component (version 1.6.0)
-            # with the ID "my-dropdown"
             id_suffix = f' with the ID "{kwargs["id"]}"' if "id" in kwargs else ""
             try:
-                # Get fancy error strings that have the version numbers
                 error_string_prefix = "The `{}.{}` component (version {}){}"
-                # These components are part of dash now, so extract the dash version:
                 dash_packages = {
                     "dash_html_components": "html",
                     "dash_core_components": "dcc",
@@ -155,7 +152,6 @@ class Component(metaclass=ComponentMeta):
                         id_suffix,
                     )
                 else:
-                    # Otherwise import the package and extract the version number
                     error_string_prefix = error_string_prefix.format(
                         self._namespace,
                         self._type,
@@ -163,8 +159,6 @@ class Component(metaclass=ComponentMeta):
                         id_suffix,
                     )
             except ImportError:
-                # Our tests create mock components with libraries that
-                # aren't importable
                 error_string_prefix = f"The `{self._type}` component{id_suffix}"
 
             if not k_in_propnames and not k_in_wildcards:
@@ -238,29 +232,39 @@ class Component(metaclass=ComponentMeta):
 
     def to_plotly_json(self):
         # Add normal properties
-        props = {
-            p: getattr(self, p)
-            for p in self._prop_names  # pylint: disable=no-member
-            if hasattr(self, p)
-        }
+        # --- Optimization: Use self.__dict__ for fast lookup, batch-get props from _prop_names
+        # Only gather those that exist in self.__dict__ (since hasattr is much slower)
+        dict_ref = self.__dict__
+        # Avoid getattr except for dynamically set properties (rare, most common case: literal properties set via __init__)
+        prop_names = self._prop_names
+        props = {}
+        for p in prop_names:
+            if p in dict_ref:
+                props[p] = dict_ref[p]
+            elif hasattr(self, p):  # Fallback for property or @property descriptors
+                props[p] = getattr(self, p)
+        # --- Optimization: Precompute tuple for startswith matching
+        wc_attrs = getattr(self, "_valid_wildcard_attributes", None)
+        if wc_attrs and not isinstance(wc_attrs, tuple):
+            # Convert once
+            wc_attrs_tuple = tuple(wc_attrs)
+            self._valid_wildcard_attributes = wc_attrs_tuple
+        else:
+            wc_attrs_tuple = wc_attrs
+
         # Add the wildcard properties data-* and aria-*
-        props.update(
-            {
-                k: getattr(self, k)
-                for k in self.__dict__
-                if any(
-                    k.startswith(w)
-                    # pylint:disable=no-member
-                    for w in self._valid_wildcard_attributes
-                )
-            }
-        )
+        # --- Optimization: use tuple startswith for better perf, only one call per key.
+        if wc_attrs_tuple:
+            for k, v in dict_ref.items():
+                if k.startswith(wc_attrs_tuple):
+                    props[k] = v
+
+        # No change below
         as_json = {
             "props": props,
             "type": self._type,  # pylint: disable=no-member
             "namespace": self._namespace,  # pylint: disable=no-member
         }
-
         return as_json
 
     # pylint: disable=too-many-branches, too-many-return-statements
