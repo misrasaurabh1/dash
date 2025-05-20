@@ -278,7 +278,7 @@ class OrderedSet(abc.MutableSet):
 
 
 def coerce_to_list(obj):
-    if not isinstance(obj, (list, tuple)):
+    if not isinstance(obj, _LIST_OR_TUPLE):
         return [obj]
     return obj
 
@@ -317,3 +317,6 @@ def pascal_case(name: Union[str, None]):
     return s[0].upper() + re.sub(
         r"[\-_\.]+([a-z])", lambda match: match.group(1).upper(), s[1:]
     )
+
+
+_LIST_OR_TUPLE = (list, tuple)
