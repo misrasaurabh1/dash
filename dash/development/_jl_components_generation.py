@@ -124,61 +124,64 @@ def get_jl_prop_types(type_object):
     """Mapping from the PropTypes js type object to the Julia type."""
 
     def shape_or_exact():
-        return "lists containing elements {}.\n{}".format(
-            ", ".join("'{}'".format(t) for t in type_object["value"]),
-            "Those elements have the following types:\n{}".format(
-                "\n".join(
-                    create_prop_docstring_jl(
-                        prop_name=prop_name,
-                        type_object=prop,
-                        required=prop["required"],
-                        description=prop.get("description", ""),
-                        indent_num=1,
-                    )
-                    for prop_name, prop in type_object["value"].items()
-                )
-            ),
+        # Cache frequently accessed vars and helper reference up front
+        value_dict = type_object["value"]
+        prop_docstrings = []
+        create_doc = create_prop_docstring_jl  # from outer scope
+
+        for prop_name, prop in value_dict.items():
+            prop_doc = create_doc(
+                prop_name=prop_name,
+                type_object=prop,
+                required=prop["required"],
+                description=prop.get("description", ""),
+                indent_num=1,
+            )
+            prop_docstrings.append(prop_doc)
+
+        prop_names_str = ", ".join(f"'{t}'" for t in value_dict)
+        prop_types_str = "\n".join(prop_docstrings)
+        return (
+            f"lists containing elements {prop_names_str}.\n"
+            f"Those elements have the following types:\n{prop_types_str}"
         )
 
-    return dict(
-        array=lambda: "Array",
-        bool=lambda: "Bool",
-        number=lambda: "Real",
-        string=lambda: "String",
-        object=lambda: "Dict",
-        any=lambda: "Bool | Real | String | Dict | Array",
-        element=lambda: "dash component",
-        node=lambda: "a list of or a singular dash component, string or number",
-        # React's PropTypes.oneOf
-        enum=lambda: "a value equal to: {}".format(
-            ", ".join("{}".format(str(t["value"])) for t in type_object["value"])
-        ),
-        # React's PropTypes.oneOfType
-        union=lambda: "{}".format(
-            " | ".join(
-                "{}".format(get_jl_type(subType))
-                for subType in type_object["value"]
-                if get_jl_type(subType) != ""
-            )
-        ),
-        # React's PropTypes.arrayOf
-        arrayOf=lambda: (
-            "Array"
-            + (
-                " of {}s".format(get_jl_type(type_object["value"]))
-                if get_jl_type(type_object["value"]) != ""
-                else ""
-            )
-        ),
-        # React's PropTypes.objectOf
-        objectOf=lambda: "Dict with Strings as keys and values of type {}".format(
-            get_jl_type(type_object["value"])
-        ),
-        # React's PropTypes.shape
-        shape=shape_or_exact,
-        # React's PropTypes.exact
-        exact=shape_or_exact,
-    )
+    def enum_lambda():
+        values = type_object["value"]
+        # Assumed to be a list of dicts with key "value"
+        return "a value equal to: " + ", ".join(str(t["value"]) for t in values)
+
+    def union_lambda():
+        subtypes = type_object["value"]
+        # Avoid repeated calls to get_jl_type per subType
+        terms = [get_jl_type(sub) for sub in subtypes]
+        filtered_terms = [t for t in terms if t]
+        return " | ".join(filtered_terms)
+
+    def arrayOf_lambda():
+        subval_type = get_jl_type(type_object["value"])
+        return "Array" + (f" of {subval_type}s" if subval_type else "")
+
+    def objectOf_lambda():
+        subval_type = get_jl_type(type_object["value"])
+        return f"Dict with Strings as keys and values of type {subval_type}"
+
+    return {
+        "array": lambda: "Array",
+        "bool": lambda: "Bool",
+        "number": lambda: "Real",
+        "string": lambda: "String",
+        "object": lambda: "Dict",
+        "any": lambda: "Bool | Real | String | Dict | Array",
+        "element": lambda: "dash component",
+        "node": lambda: "a list of or a singular dash component, string or number",
+        "enum": enum_lambda,  # React's PropTypes.oneOf
+        "union": union_lambda,  # React's PropTypes.oneOfType
+        "arrayOf": arrayOf_lambda,  # React's PropTypes.arrayOf
+        "objectOf": objectOf_lambda,  # React's PropTypes.objectOf
+        "shape": shape_or_exact,  # React's PropTypes.shape
+        "exact": shape_or_exact,  # React's PropTypes.exact
+    }
 
 
 def filter_props(props):
