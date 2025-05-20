@@ -231,12 +231,35 @@ def get_jl_type(type_object):
     str
         Julia type string
     """
-    js_type_name = type_object["name"]
-    js_to_jl_types = get_jl_prop_types(type_object=type_object)
-    if js_type_name in js_to_jl_types:
-        prop_type = js_to_jl_types[js_type_name]()
-        return prop_type
-    return ""
+    name = type_object["name"]
+    if name == "array":
+        return "Array"
+    elif name == "bool":
+        return "Bool"
+    elif name == "number":
+        return "Real"
+    elif name == "string":
+        return "String"
+    elif name == "object":
+        return "Dict"
+    elif name == "any":
+        return "Bool | Real | String | Dict | Array"
+    elif name == "element":
+        return "dash component"
+    elif name == "node":
+        return "a list of or a singular dash component, string or number"
+    elif name == "enum":
+        return _jl_enum(type_object)
+    elif name == "union":
+        return _jl_union(type_object)
+    elif name == "arrayOf":
+        return _jl_arrayOf(type_object)
+    elif name == "objectOf":
+        return _jl_objectOf(type_object)
+    elif name == "shape" or name == "exact":
+        return _shape_or_exact(type_object)
+    else:
+        return ""
 
 
 def print_jl_type(typedata):
@@ -547,3 +570,54 @@ def generate_module(
 
     generate_package_file(project_shortname, components, pkg_data, prefix)
     generate_toml_file(project_shortname, pkg_data)
+
+
+def _shape_or_exact(type_object):
+    # Optimized shape/exact string construction
+    value = type_object["value"]
+    prop_items = value.items()
+    prop_names = []
+    prop_descs = []
+    append = prop_names.append
+    for prop_name, prop in prop_items:
+        append("'{}'".format(prop_name))
+        prop_descs.append(
+            create_prop_docstring_jl(
+                prop_name=prop_name,
+                type_object=prop,
+                required=prop["required"],
+                description=prop.get("description", ""),
+                indent_num=1,
+            )
+        )
+    return "lists containing elements {}.\nThose elements have the following types:\n{}".format(
+        ", ".join(prop_names), "\n".join(prop_descs)
+    )
+
+
+def _jl_enum(type_object):
+    # Faster enum string formatting
+    return "a value equal to: {}".format(
+        ", ".join(str(t["value"]) for t in type_object["value"])
+    )
+
+
+def _jl_union(type_object):
+    # Faster PropTypes.oneOfType (union) logic
+    parts = []
+    for subType in type_object["value"]:
+        t = get_jl_type(subType)
+        if t:
+            parts.append(t)
+    return " | ".join(parts)
+
+
+def _jl_arrayOf(type_object):
+    v = get_jl_type(type_object["value"])
+    return "Array" + (" of {}s".format(v) if v else "")
+
+
+def _jl_objectOf(type_object):
+    return "Dict with Strings as keys and values of type {}".format(
+        get_jl_type(type_object["value"])
+    )
