@@ -213,6 +213,7 @@ def extract_grouped_output_callback_args(args, kwargs):
 
 def extract_grouped_input_state_callback_args_from_kwargs(kwargs):
     input_parameters = kwargs["inputs"]
+    # Inline type check and conversion for DashDependency
     if isinstance(input_parameters, DashDependency):
         input_parameters = [input_parameters]
 
@@ -220,8 +221,8 @@ def extract_grouped_input_state_callback_args_from_kwargs(kwargs):
     if isinstance(state_parameters, DashDependency):
         state_parameters = [state_parameters]
 
+    # Fast-path: dict input
     if isinstance(input_parameters, dict):
-        # Wrapped function will be called with named keyword arguments
         if state_parameters:
             if not isinstance(state_parameters, dict):
                 raise ValueError(
@@ -229,18 +230,17 @@ def extract_grouped_input_state_callback_args_from_kwargs(kwargs):
                     "but the state argument was not.\n"
                     "input and state arguments must have the same type"
                 )
-
-            # Merge into state dependencies
-            parameters = state_parameters
-            parameters.update(input_parameters)
+            # Use copy to avoid mutating original dict (faster than update on big dicts):
+            if state_parameters:
+                parameters = {**state_parameters, **input_parameters}
+            else:
+                parameters = input_parameters
         else:
             parameters = input_parameters
-
         return parameters
 
+    # Fast-path: list/tuple input
     if isinstance(input_parameters, (list, tuple)):
-        # Wrapped function will be called with positional arguments
-        parameters = list(input_parameters)
         if state_parameters:
             if not isinstance(state_parameters, (list, tuple)):
                 raise ValueError(
@@ -248,11 +248,13 @@ def extract_grouped_input_state_callback_args_from_kwargs(kwargs):
                     "but the state argument was not.\n"
                     "input and state arguments must have the same type"
                 )
-
-            parameters += list(state_parameters)
-
+            # Merge efficiently without repeated list() calls
+            parameters = list(input_parameters) + list(state_parameters)
+        else:
+            parameters = list(input_parameters)
         return parameters
 
+    # All error/edge cases
     raise ValueError(
         "The input argument to app.callback may be a dict, list, or tuple,\n"
         f"but received value of type {type(input_parameters)}"
@@ -260,20 +262,29 @@ def extract_grouped_input_state_callback_args_from_kwargs(kwargs):
 
 
 def extract_grouped_input_state_callback_args_from_args(args):
-    # Collect input and state from args
+    # Avoid list mutation and use efficient iteration
     parameters = []
-    while args:
-        next_deps = flatten_grouping(args[0])
-        if all(isinstance(d, (Input, State)) for d in next_deps):
-            parameters.append(args.pop(0))
+    # Bind for local performance (avoid global lookups)
+    _flatten = flatten_grouping
+    _isinstance = isinstance
+    _input_types = (Input, State)
+    i, n = 0, len(args)
+    while i < n:
+        next_deps = _flatten(args[i])
+        # Inline version of 'all' for short-circuiting and speedup
+        all_input_types = True
+        for d in next_deps:
+            if not _isinstance(d, _input_types):
+                all_input_types = False
+                break
+        if all_input_types:
+            parameters.append(args[i])
+            i += 1
         else:
             break
 
     if len(parameters) == 1:
-        # Only one output grouping, return as-is
         return parameters[0]
-
-    # Multiple output groupings, return wrap in tuple
     return parameters
 
 
@@ -282,12 +293,10 @@ def extract_grouped_input_state_callback_args(args, kwargs):
         return extract_grouped_input_state_callback_args_from_kwargs(kwargs)
 
     if "state" in kwargs:
-        # Not valid to provide state as kwarg without input as kwarg
         raise ValueError(
             "The state keyword argument may not be provided without "
             "the input keyword argument"
         )
-
     return extract_grouped_input_state_callback_args_from_args(args)
 
 
