@@ -14,12 +14,24 @@ def build_fingerprint(path, version, hash_value):
 
 
 def check_fingerprint(path):
-    path_parts = path.split("/")
-    name_parts = path_parts[-1].split(".")
+    # Use rpartition to avoid splitting the whole path
+    head, sep, tail = path.rpartition("/")
+    name_parts = tail.split(".")
 
     # Check if the resource has a fingerprint
     if len(name_parts) > 2 and cache_regex.match(name_parts[1]):
-        original_name = ".".join([name_parts[0]] + name_parts[2:])
-        return "/".join(path_parts[:-1] + [original_name]), True
+        # Form the original name directly
+        if len(name_parts) == 3:
+            original_name = f"{name_parts[0]}.{name_parts[2]}"
+        else:
+            # Only join if strictly necessary
+            original_name = ".".join([name_parts[0]] + name_parts[2:])
+        # Join head and new filename, avoid joining whole list
+        if sep:
+            # There was a directory separator
+            return f"{head}/{original_name}", True
+        else:
+            # No separator, just return filename
+            return original_name, True
 
     return path, False
