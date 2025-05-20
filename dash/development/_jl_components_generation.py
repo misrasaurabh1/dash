@@ -231,19 +231,71 @@ def get_jl_type(type_object):
     str
         Julia type string
     """
+    # Avoid creating full type map if not necessary (lookup js_type_name first)
     js_type_name = type_object["name"]
-    js_to_jl_types = get_jl_prop_types(type_object=type_object)
-    if js_type_name in js_to_jl_types:
-        prop_type = js_to_jl_types[js_type_name]()
-        return prop_type
-    return ""
+    # Inline version of get_jl_prop_types()
+    def shape_or_exact():
+        val = type_object["value"]
+        elems = ", ".join("'{}'".format(t) for t in val)
+        docstrs = "\n".join(
+            create_prop_docstring_jl(
+                prop_name=prop_name,
+                type_object=prop,
+                required=prop["required"],
+                description=prop.get("description", ""),
+                indent_num=1,
+            )
+            for prop_name, prop in val.items()
+        )
+        return "lists containing elements {}.\nThose elements have the following types:\n{}".format(
+            elems, docstrs
+        )
+
+    if js_type_name == "array":
+        return "Array"
+    elif js_type_name == "bool":
+        return "Bool"
+    elif js_type_name == "number":
+        return "Real"
+    elif js_type_name == "string":
+        return "String"
+    elif js_type_name == "object":
+        return "Dict"
+    elif js_type_name == "any":
+        return "Bool | Real | String | Dict | Array"
+    elif js_type_name == "element":
+        return "dash component"
+    elif js_type_name == "node":
+        return "a list of or a singular dash component, string or number"
+    elif js_type_name == "enum":
+        return "a value equal to: {}".format(
+            ", ".join(str(t["value"]) for t in type_object["value"])
+        )
+    elif js_type_name == "union":
+        return " | ".join(
+            s
+            for s in (get_jl_type(subType) for subType in type_object["value"])
+            if s != ""
+        )
+    elif js_type_name == "arrayOf":
+        subtype = get_jl_type(type_object["value"])
+        return "Array" + (" of {}s".format(subtype) if subtype else "")
+    elif js_type_name == "objectOf":
+        return "Dict with Strings as keys and values of type {}".format(
+            get_jl_type(type_object["value"])
+        )
+    elif js_type_name == "shape" or js_type_name == "exact":
+        return shape_or_exact()
+    else:
+        return ""
 
 
 def print_jl_type(typedata):
-    typestring = get_jl_type(typedata).capitalize()
-    if typestring:
-        typestring += ". "
-    return typestring
+    # Minimize redundant capitalize by joining with ". " only if typestring is not empty
+    s = get_jl_type(typedata)
+    if s:
+        return s.capitalize() + ". "
+    return ""
 
 
 def create_docstring_jl(component_name, props, description):
