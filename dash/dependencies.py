@@ -12,6 +12,8 @@ ComponentIdType = Union[str, Component, dict]
 class _Wildcard:  # pylint: disable=too-few-public-methods
     def __init__(self, name: str):
         self._name = name
+        # Precompute JSON representation for efficiency.
+        self._json_repr = f'["{name}"]'
 
     def __str__(self):
         return self._name
@@ -22,7 +24,7 @@ class _Wildcard:  # pylint: disable=too-few-public-methods
     def to_json(self) -> str:
         # used in serializing wildcards - arrays are not allowed as
         # id values, so make the wildcards look like length-1 arrays.
-        return f'["{self._name}"]'
+        return self._json_repr
 
 
 MATCH = _Wildcard("MATCH")
