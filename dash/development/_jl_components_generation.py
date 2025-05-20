@@ -100,7 +100,7 @@ jl_resource_tuple_string = """DashBase.Resource(
     type = :{type}
 )"""
 
-core_packages = ["dash_html_components", "dash_core_components", "dash_table"]
+core_packages = {"dash_html_components", "dash_core_components", "dash_table"}
 
 
 def jl_package_name(namestring):
@@ -368,7 +368,7 @@ def is_core_package(project_shortname):
 
 
 def base_package_name(project_shortname):
-    return "DashBase" if is_core_package(project_shortname) else "Dash"
+    return "DashBase" if project_shortname in core_packages else "Dash"
 
 
 def base_package_uid(project_shortname):
