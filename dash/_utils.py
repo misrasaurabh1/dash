@@ -83,12 +83,10 @@ class AttributeDict(dict):
         self[key] = value
 
     def __getattr__(self, key):
-        try:
-            return self[key]
-        except KeyError:
-            pass
-        # to conform with __getattr__ spec
-        # but get out of the except block so it doesn't look like a nested err
+        # Avoid exception overhead; check for key first
+        if dict.__contains__(self, key):
+            return dict.__getitem__(self, key)
+        # Raise AttributeError if key not found
         raise AttributeError(key)
 
     def set_read_only(self, names, msg="Attribute is read-only"):
