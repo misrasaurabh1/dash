@@ -53,9 +53,13 @@ class NoUpdate:
 
     @staticmethod
     def is_no_update(obj):
-        return isinstance(obj, NoUpdate) or (
-            isinstance(obj, dict) and obj == {"_dash_no_update": "_dash_no_update"}
-        )
+        # Fast-path: direct instance check
+        if isinstance(obj, NoUpdate):
+            return True
+        # Only check dicts with exactly one item with the required key and value
+        if isinstance(obj, dict) and len(obj) == 1:
+            return obj.get("_dash_no_update") == "_dash_no_update"
+        return False
 
 
 GLOBAL_CALLBACK_LIST = []
