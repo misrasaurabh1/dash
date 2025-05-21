@@ -646,66 +646,75 @@ def create_prop_docstring(
 def map_js_to_py_types_prop_types(type_object, indent_num):
     """Mapping from the PropTypes js type object to the Python type."""
 
+    # Optimized helpers move locals out of inner function scopes where possible
+    value = type_object.get("value")
+    elements = type_object.get("elements")
+
     def shape_or_exact():
-        return "dict with keys:\n" + "\n".join(
+        # Cache locals for speedup
+        items = value.items()
+        pad = indent_num + 2
+        # Build once, store as a list and join at the end
+        mapped_props = [
             create_prop_docstring(
                 prop_name=prop_name,
                 type_object=prop,
                 required=prop["required"],
                 description=prop.get("description", ""),
                 default=prop.get("defaultValue"),
-                indent_num=indent_num + 2,
+                indent_num=pad,
             )
-            for prop_name, prop in type_object["value"].items()
-        )
+            for prop_name, prop in items
+        ]
+        return "dict with keys:\n" + "\n".join(mapped_props)
 
     def array_of():
-        inner = js_to_py_type(type_object["value"])
+        inner = js_to_py_type(value)
         if inner:
-            return "list of " + (
-                inner + "s"
-                if inner.split(" ")[0] != "dict"
-                else inner.replace("dict", "dicts", 1)
-            )
+            # Avoid using split if possible (split is slower than `startswith`)
+            if inner.startswith("dict"):
+                return "list of " + inner.replace("dict", "dicts", 1)
+            else:
+                return "list of " + inner + "s"
         return "list"
 
     def tuple_of():
-        elements = [js_to_py_type(element) for element in type_object["elements"]]
-        return f"list of {len(elements)} elements: [{', '.join(elements)}]"
+        # Use list comprehension and join efficiently
+        elem_types = [js_to_py_type(element) for element in elements]
+        return f"list of {len(elem_types)} elements: [{', '.join(elem_types)}]"
 
-    return dict(
-        array=lambda: "list",
-        bool=lambda: "boolean",
-        number=lambda: "number",
-        string=lambda: "string",
-        object=lambda: "dict",
-        any=lambda: "boolean | number | string | dict | list",
-        element=lambda: "dash component",
-        node=lambda: "a list of or a singular dash component, string or number",
+    # Static mapping table for fastest dispatch
+    # Note: lambda's cannot take arguments, but closures will see parent-scope bindings.
+    DISPATCH = {
+        "array": lambda: "list",
+        "bool": lambda: "boolean",
+        "number": lambda: "number",
+        "string": lambda: "string",
+        "object": lambda: "dict",
+        "any": lambda: "boolean | number | string | dict | list",
+        "element": lambda: "dash component",
+        "node": lambda: "a list of or a singular dash component, string or number",
         # React's PropTypes.oneOf
-        enum=lambda: (
-            "a value equal to: "
-            + ", ".join(str(t["value"]) for t in type_object["value"])
+        "enum": lambda: (
+            "a value equal to: " + ", ".join(str(t["value"]) for t in value)
         ),
         # React's PropTypes.oneOfType
-        union=lambda: " | ".join(
-            js_to_py_type(subType)
-            for subType in type_object["value"]
-            if js_to_py_type(subType) != ""
+        "union": lambda: " | ".join(
+            typ for typ in (js_to_py_type(subType) for subType in value) if typ
         ),
         # React's PropTypes.arrayOf
-        arrayOf=array_of,
+        "arrayOf": array_of,
         # React's PropTypes.objectOf
-        objectOf=lambda: (
-            "dict with strings as keys and values of type "
-            + js_to_py_type(type_object["value"])
+        "objectOf": lambda: (
+            "dict with strings as keys and values of type " + js_to_py_type(value)
         ),
-        # React's PropTypes.shape
-        shape=shape_or_exact,
-        # React's PropTypes.exact
-        exact=shape_or_exact,
-        tuple=tuple_of,
-    )
+        # React's PropTypes.shape and exact
+        "shape": shape_or_exact,
+        "exact": shape_or_exact,
+        "tuple": tuple_of,
+    }
+
+    return DISPATCH
 
 
 def map_js_to_py_types_flow_types(type_object):
