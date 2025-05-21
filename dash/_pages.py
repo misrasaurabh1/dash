@@ -67,21 +67,26 @@ def _module_name_to_page_name(module_name):
 
 def _infer_path(module_name, template):
     if template is None:
-        if CONFIG.pages_folder:
-            pages_module = str(Path(CONFIG.pages_folder).name)
-            path = (
-                module_name.split(pages_module)[-1]
-                .replace("_", "-")
-                .replace(".", "/")
-                .lower()
-            )
+        pages_folder = CONFIG.pages_folder
+        if pages_folder:
+            # get the last part of the pages_folder path once
+            pages_module = Path(pages_folder).name
+            try:
+                # find only the part after the matched folder name, or fallback to full module_name
+                idx = module_name.split(".").index(pages_module)
+                sub_path = module_name.split(".", idx)[-1]
+            except ValueError:
+                sub_path = module_name
+            # Avoid multiple split and joins: just use replace on the required tail section
+            path = sub_path.replace("_", "-").replace(".", "/").lower()
         else:
             path = module_name.replace("_", "-").replace(".", "/").lower()
     else:
         # replace the variables in the template with "none" to create a default path if
         # no path is supplied
-        path = re.sub("<.*?>", "none", template)
-    path = "/" + path if not path.startswith("/") else path
+        path = _TEMPLATE_VAR_PATTERN.sub("none", template)
+    if not path.startswith("/"):
+        path = "/" + path
     return path
 
 
@@ -454,3 +459,6 @@ def _import_layouts_from_pages(pages_folder):
             ):
                 _validate.validate_pages_layout(module_name, page_module)
                 PAGE_REGISTRY[module_name]["layout"] = getattr(page_module, "layout")
+
+
+_TEMPLATE_VAR_PATTERN = re.compile(r"<.*?>")
