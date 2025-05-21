@@ -18,6 +18,7 @@ from ._py_prop_typing import (
     get_custom_imports,
 )
 from .base_component import Component, ComponentType
+from functools import lru_cache
 
 import_string = """# AUTO GENERATED FILE - DO NOT EDIT
 
@@ -645,110 +646,22 @@ def create_prop_docstring(
 
 def map_js_to_py_types_prop_types(type_object, indent_num):
     """Mapping from the PropTypes js type object to the Python type."""
-
-    def shape_or_exact():
-        return "dict with keys:\n" + "\n".join(
-            create_prop_docstring(
-                prop_name=prop_name,
-                type_object=prop,
-                required=prop["required"],
-                description=prop.get("description", ""),
-                default=prop.get("defaultValue"),
-                indent_num=indent_num + 2,
-            )
-            for prop_name, prop in type_object["value"].items()
-        )
-
-    def array_of():
-        inner = js_to_py_type(type_object["value"])
-        if inner:
-            return "list of " + (
-                inner + "s"
-                if inner.split(" ")[0] != "dict"
-                else inner.replace("dict", "dicts", 1)
-            )
-        return "list"
-
-    def tuple_of():
-        elements = [js_to_py_type(element) for element in type_object["elements"]]
-        return f"list of {len(elements)} elements: [{', '.join(elements)}]"
-
-    return dict(
-        array=lambda: "list",
-        bool=lambda: "boolean",
-        number=lambda: "number",
-        string=lambda: "string",
-        object=lambda: "dict",
-        any=lambda: "boolean | number | string | dict | list",
-        element=lambda: "dash component",
-        node=lambda: "a list of or a singular dash component, string or number",
-        # React's PropTypes.oneOf
-        enum=lambda: (
-            "a value equal to: "
-            + ", ".join(str(t["value"]) for t in type_object["value"])
-        ),
-        # React's PropTypes.oneOfType
-        union=lambda: " | ".join(
-            js_to_py_type(subType)
-            for subType in type_object["value"]
-            if js_to_py_type(subType) != ""
-        ),
-        # React's PropTypes.arrayOf
-        arrayOf=array_of,
-        # React's PropTypes.objectOf
-        objectOf=lambda: (
-            "dict with strings as keys and values of type "
-            + js_to_py_type(type_object["value"])
-        ),
-        # React's PropTypes.shape
-        shape=shape_or_exact,
-        # React's PropTypes.exact
-        exact=shape_or_exact,
-        tuple=tuple_of,
-    )
+    cache_key = (id(type_object), indent_num)
+    # Use id(type_object), because type_object can change, but will have the same mapping in call context.
+    mapping = _prop_types_cache.get(cache_key)
+    if mapping is None:
+        mapping = _make_prop_types_map(type_object, indent_num)
+        _prop_types_cache[cache_key] = mapping
+    return mapping
 
 
 def map_js_to_py_types_flow_types(type_object):
     """Mapping from the Flow js types to the Python type."""
-    return dict(
-        array=lambda: "list",
-        boolean=lambda: "boolean",
-        number=lambda: "number",
-        string=lambda: "string",
-        Object=lambda: "dict",
-        any=lambda: "bool | number | str | dict | list",
-        Element=lambda: "dash component",
-        Node=lambda: "a list of or a singular dash component, string or number",
-        # React's PropTypes.oneOfType
-        union=lambda: " | ".join(
-            js_to_py_type(subType)
-            for subType in type_object["elements"]
-            if js_to_py_type(subType) != ""
-        ),
-        # Flow's Array type
-        Array=lambda: "list"
-        + (
-            f' of {js_to_py_type(type_object["elements"][0])}s'
-            if js_to_py_type(type_object["elements"][0]) != ""
-            else ""
-        ),
-        # React's PropTypes.shape
-        signature=lambda indent_num: (
-            "dict with keys:\n"
-            + "\n".join(
-                create_prop_docstring(
-                    prop_name=prop["key"],
-                    type_object=prop["value"],
-                    required=prop["value"]["required"],
-                    description=prop["value"].get("description", ""),
-                    default=prop.get("defaultValue"),
-                    indent_num=indent_num + 2,
-                    is_flow_type=True,
-                )
-                for prop in type_object["signature"]["properties"]
-            )
-        ),
-    )
+    # Store type_object by id so lru_cache can reference it
+    if not hasattr(_make_flow_types_map, "_obj_dict"):
+        _make_flow_types_map._obj_dict = {}
+    _make_flow_types_map._obj_dict[id(type_object)] = type_object
+    return _make_flow_types_map(id(type_object))
 
 
 def js_to_py_type(type_object, is_flow_type=False, indent_num=0):
@@ -766,15 +679,12 @@ def js_to_py_type(type_object, is_flow_type=False, indent_num=0):
     str
         Python type string
     """
-
+    # Fast path: static lookup for type names in PropTypes/Flow
     js_type_name = type_object["name"]
-    js_to_py_types = (
-        map_js_to_py_types_flow_types(type_object=type_object)
-        if is_flow_type
-        else map_js_to_py_types_prop_types(
-            type_object=type_object, indent_num=indent_num
-        )
-    )
+    if is_flow_type:
+        js_to_py_types = map_js_to_py_types_flow_types(type_object)
+    else:
+        js_to_py_types = map_js_to_py_types_prop_types(type_object, indent_num)
 
     if (
         "computed" in type_object
@@ -785,6 +695,121 @@ def js_to_py_type(type_object, is_flow_type=False, indent_num=0):
     if js_type_name in js_to_py_types:
         if js_type_name == "signature":  # This is a Flow object w/ signature
             return js_to_py_types[js_type_name](indent_num)  # type: ignore[reportCallIssue]
-        # All other types
         return js_to_py_types[js_type_name]()  # type: ignore[reportCallIssue]
     return ""
+
+
+# Helper for the frequently repeated mapping in prop_types (with indent_num in context)
+def _make_prop_types_map(type_object, indent_num):
+    def shape_or_exact():
+        # Loop across items only once, use join on final result
+        items = type_object["value"].items()
+        return "dict with keys:\n" + "\n".join(
+            create_prop_docstring(
+                prop_name=prop_name,
+                type_object=prop,
+                required=prop["required"],
+                description=prop.get("description", ""),
+                default=prop.get("defaultValue"),
+                indent_num=indent_num + 2,
+            )
+            for prop_name, prop in items
+        )
+
+    def array_of():
+        inner = js_to_py_type(type_object["value"])
+        if inner:
+            # only split/replace first word
+            if inner.startswith("dict"):
+                return "list of dicts" + inner[4:]
+            else:
+                return "list of " + inner + "s"
+        return "list"
+
+    def tuple_of():
+        # List comprehension to build list only once
+        elements = [js_to_py_type(element) for element in type_object["elements"]]
+        return f"list of {len(elements)} elements: [{', '.join(elements)}]"
+
+    # These are static strings, do not need recompute
+    simple_types = {
+        "array": "list",
+        "bool": "boolean",
+        "number": "number",
+        "string": "string",
+        "object": "dict",
+        "any": "boolean | number | string | dict | list",
+        "element": "dash component",
+        "node": "a list of or a singular dash component, string or number",
+    }
+    # All lambdas now return directly, except those that need access to local closure or type_object
+    mapping = {
+        **{k: (lambda v=val: lambda: v)() for k, val in simple_types.items()},
+        "enum": lambda: (
+            "a value equal to: "
+            + ", ".join(str(t["value"]) for t in type_object["value"])
+        ),
+        "union": lambda: " | ".join(
+            js_to_py_type(subType)
+            for subType in type_object["value"]
+            if js_to_py_type(subType) != ""
+        ),
+        "arrayOf": array_of,
+        "objectOf": lambda: (
+            "dict with strings as keys and values of type "
+            + js_to_py_type(type_object["value"])
+        ),
+        "shape": shape_or_exact,
+        "exact": shape_or_exact,
+        "tuple": tuple_of,
+    }
+    return mapping
+
+
+# For Flow types, memoize with lru_cache, keyed by id(type_object)
+@lru_cache(maxsize=128)
+def _make_flow_types_map(type_object_id):
+    # To use lru_cache across call, type_object must be accessible via id
+    # Supply type_object as argument for [signature] closure
+    # (caller guarantees type_object will not be deleted in call, so id is safe)
+    type_object = _make_flow_types_map._obj_dict[type_object_id]
+    mapping = {
+        "array": lambda: "list",
+        "boolean": lambda: "boolean",
+        "number": lambda: "number",
+        "string": lambda: "string",
+        "Object": lambda: "dict",
+        "any": lambda: "bool | number | str | dict | list",
+        "Element": lambda: "dash component",
+        "Node": lambda: "a list of or a singular dash component, string or number",
+        "union": lambda: " | ".join(
+            js_to_py_type(subType)
+            for subType in type_object["elements"]
+            if js_to_py_type(subType) != ""
+        ),
+        "Array": lambda: "list"
+        + (
+            f' of {js_to_py_type(type_object["elements"][0])}s'
+            if js_to_py_type(type_object["elements"][0]) != ""
+            else ""
+        ),
+        "signature": lambda indent_num: (
+            "dict with keys:\n"
+            + "\n".join(
+                create_prop_docstring(
+                    prop_name=prop["key"],
+                    type_object=prop["value"],
+                    required=prop["value"]["required"],
+                    description=prop["value"].get("description", ""),
+                    default=prop.get("defaultValue"),
+                    indent_num=indent_num + 2,
+                    is_flow_type=True,
+                )
+                for prop in type_object["signature"]["properties"]
+            )
+        ),
+    }
+    return mapping
+
+
+_prop_types_cache = {}
