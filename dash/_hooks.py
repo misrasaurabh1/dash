@@ -82,12 +82,14 @@ class _Hooks:
         self._ns[hook] = sorted(hks, reverse=True, key=lambda h: h.priority)
 
     def get_hooks(self, hook: str) -> _t.List[_Hook]:
-        final = self._finals.get(hook, None)
-        if final:
-            final = [final]
-        else:
-            final = []
-        return self._ns.get(hook, []) + final
+        # Get regular and, at most, one final hook efficiently
+        hooks = self._ns.get(hook)
+        final = self._finals.get(hook)
+        if final is not None:
+            if hooks:
+                return hooks + [final]
+            return [final]
+        return hooks if hooks else []
 
     def layout(self, priority: _t.Optional[int] = None, final: bool = False):
         """
