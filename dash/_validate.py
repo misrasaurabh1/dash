@@ -564,7 +564,8 @@ def validate_duplicate_output(
     if "initial_duplicate" in (prevent_initial_call, config_prevent_initial_call):
         return
 
-    def _valid(out):
+    # Direct inlined check to avoid closure/call overhead
+    def check_valid(out):
         if (
             out.allow_duplicate
             and not prevent_initial_call
@@ -577,10 +578,21 @@ def validate_duplicate_output(
                 " or globally in the config prevent_initial_callbacks='initial_duplicate'"
             )
 
-    if isinstance(output, (list, tuple)):
-        for o in output:
-            _valid(o)
-
+    # Fast path for single object
+    if not isinstance(output, (list, tuple)):
+        check_valid(output)
         return
 
-    _valid(output)
+    # Use a for-loop but avoid extra function scope/memory
+    for o in output:
+        if (
+            o.allow_duplicate
+            and not prevent_initial_call
+            and not config_prevent_initial_call
+        ):
+            raise exceptions.DuplicateCallback(
+                "allow_duplicate requires prevent_initial_call to be True. The order of the call is not"
+                " guaranteed to be the same on every page load. "
+                "To enable duplicate callback with initial call, set prevent_initial_call='initial_duplicate' "
+                " or globally in the config prevent_initial_callbacks='initial_duplicate'"
+            )
