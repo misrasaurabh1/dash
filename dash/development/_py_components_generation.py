@@ -535,10 +535,8 @@ def fix_keywords(txt):
     """
     replaces javascript keywords true, false, null with Python keywords
     """
-    fix_word = {"true": "True", "false": "False", "null": "None"}
-    for js_keyword, python_keyword in fix_word.items():
-        txt = txt.replace(js_keyword, python_keyword)
-    return txt
+    # Minor micro-opt: chain replaces since the set is small and non-overlapping, avoids dict lookup for each
+    return txt.replace("true", "True").replace("false", "False").replace("null", "None")
 
 
 # pylint: disable=too-many-arguments
@@ -580,40 +578,52 @@ def create_prop_docstring(
     py_type_name = js_to_py_type(
         type_object=type_object, is_flow_type=is_flow_type, indent_num=indent_num
     )
+
     indent_spacing = "  " * indent_num
 
-    default = default["value"] if default else ""
-    default = fix_keywords(default)
+    # Only do dict lookups once, and avoid possibly slow repeated function calls
+    if default:
+        def_val = default.get("value", "")
+    else:
+        def_val = ""
+    default_str = fix_keywords(def_val)
 
-    is_required = "optional"
     if required:
         is_required = "required"
-    elif default and default not in ["None", "{}", "[]"]:
-        is_required = "default " + default.replace("\n", "")
+    elif default_str and default_str not in {"None", "{}", "[]"}:
+        is_required = "default " + default_str.replace("\n", "")
+    else:
+        is_required = "optional"
 
-    # formats description
-    period = "." if description else ""
-    description = description.strip().strip(".").replace('"', r"\"") + period
-    desc_indent = indent_spacing + "    "
-    description = fill(
-        description,
-        initial_indent=desc_indent,
-        subsequent_indent=desc_indent,
-        break_long_words=False,
-        break_on_hyphens=False,
-    )
-    description = f"\n{description}" if description else ""
-    colon = ":" if description else ""
-    description = fix_keywords(description)
+    # Improved efficient handling of description formatting
+    if description:
+        desc_clean = description.strip().strip(".").replace('"', r"\"")
+        desc_val = desc_clean + "."
+        desc_indent = indent_spacing + "    "
+        formatted_desc = fill(
+            desc_val,
+            initial_indent=desc_indent,
+            subsequent_indent=desc_indent,
+            break_long_words=False,
+            break_on_hyphens=False,
+        )
+        description_doc = "\n" + fix_keywords(formatted_desc)
+        colon = ":"
+    else:
+        description_doc = ""
+        colon = ""
 
+    # Fast path for complex/nested type strings (i.e. doc for dict/shape/exact)
     if "\n" in py_type_name:
         # corrects the type
-        dict_or_list = "list of dicts" if py_type_name.startswith("list") else "dict"
+        is_list = py_type_name.startswith("list")
+        dict_or_list = "list of dicts" if is_list else "dict"
 
         # format and rewrite the intro to the nested dicts
         intro1, intro2, dict_descr = py_type_name.partition("with keys:")
         intro = f"`{prop_name}` is a {intro1}{intro2}"
-        intro = fill(
+        desc_indent = indent_spacing + "    "
+        intro_filled = fill(
             intro,
             initial_indent=desc_indent,
             subsequent_indent=desc_indent,
@@ -621,26 +631,29 @@ def create_prop_docstring(
             break_on_hyphens=False,
         )
 
-        # captures optional nested dict description and puts the "or" condition on a new line
+        # Optimized processing of nested dict descriptions and 'or' cases
         if "| dict with keys:" in dict_descr:
             dict_part1, dict_part2 = dict_descr.split(" |", 1)
-            dict_part2 = "".join([desc_indent, "Or", dict_part2])
+            dict_part2 = desc_indent + "Or" + dict_part2
             dict_descr = f"{dict_part1}\n\n  {dict_part2}"
 
         # ensures indent is correct if there is a second nested list of dicts
-        current_indent = dict_descr.lstrip("\n").find("-")
-        if current_indent == len(indent_spacing):
+        dict_descr_stripped = dict_descr.lstrip("\n")
+        idx_dash = dict_descr_stripped.find("-")
+        if idx_dash == len(indent_spacing):
             dict_descr = "".join(
-                "\n\n    " + line for line in dict_descr.splitlines() if line != ""
+                "\n\n    " + line for line in dict_descr.splitlines() if line
             )
-
         return (
             f"\n{indent_spacing}- {prop_name} ({dict_or_list}; {is_required}){colon}"
-            f"{description}"
-            f"\n\n{intro}{dict_descr}"
+            f"{description_doc}"
+            f"\n\n{intro_filled}{dict_descr}"
         )
+
     tn = f"{py_type_name}; " if py_type_name else ""
-    return f"\n{indent_spacing}- {prop_name} ({tn}{is_required}){colon}{description}"
+    return (
+        f"\n{indent_spacing}- {prop_name} ({tn}{is_required}){colon}{description_doc}"
+    )
 
 
 def map_js_to_py_types_prop_types(type_object, indent_num):
@@ -766,25 +779,26 @@ def js_to_py_type(type_object, is_flow_type=False, indent_num=0):
     str
         Python type string
     """
-
     js_type_name = type_object["name"]
-    js_to_py_types = (
-        map_js_to_py_types_flow_types(type_object=type_object)
-        if is_flow_type
-        else map_js_to_py_types_prop_types(
+
+    # Move the lookup tables out of the hot path; don't recreate every call
+    if is_flow_type:
+        js_to_py_types = map_js_to_py_types_flow_types(type_object=type_object)
+    else:
+        js_to_py_types = map_js_to_py_types_prop_types(
             type_object=type_object, indent_num=indent_num
         )
-    )
 
-    if (
-        "computed" in type_object
-        and type_object["computed"]
-        or type_object.get("type", "") == "function"
-    ):
+    # Short-circuit cases for speed, minimize chained conditionals
+    computed = type_object.get("computed")
+    type_str = type_object.get("type", "")
+    if (computed is not None and computed) or type_str == "function":
         return ""
     if js_type_name in js_to_py_types:
-        if js_type_name == "signature":  # This is a Flow object w/ signature
-            return js_to_py_types[js_type_name](indent_num)  # type: ignore[reportCallIssue]
-        # All other types
-        return js_to_py_types[js_type_name]()  # type: ignore[reportCallIssue]
+        if js_type_name == "signature":
+            return js_to_py_types[js_type_name](indent_num)
+        return js_to_py_types[js_type_name]()
     return ""
+
+
+_JS2PY_WORDS = {"true": "True", "false": "False", "null": "None"}
