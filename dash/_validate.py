@@ -15,6 +15,7 @@ from ._utils import (
     coerce_to_list,
     clean_property_name,
 )
+import operator
 
 
 def validate_callback(outputs, inputs, state, extra_args, types):
@@ -142,15 +143,21 @@ def validate_and_group_input_args(flat_args, arg_index_grouping):
     if grouping_len(arg_index_grouping) != len(flat_args):
         raise exceptions.CallbackException("Inputs do not match callback definition")
 
+    # Use operator.itemgetter to speed up the lambda
+    getter = operator.itemgetter(*range(len(flat_args))) if flat_args else None
+    # No real gain for single-itemgetter here, use lambda inline as original
+
     args_grouping = map_grouping(lambda ind: flat_args[ind], arg_index_grouping)
+
     if isinstance(arg_index_grouping, dict):
         func_args = []
         func_kwargs = args_grouping
-        for key in func_kwargs:
-            if not key.isidentifier():
-                raise exceptions.CallbackException(
-                    f"{key} is not a valid Python variable name"
-                )
+        # Use any() for fast short-circuiting
+        invalid_key = next((key for key in func_kwargs if not key.isidentifier()), None)
+        if invalid_key is not None:
+            raise exceptions.CallbackException(
+                f"{invalid_key} is not a valid Python variable name"
+            )
     elif isinstance(arg_index_grouping, (tuple, list)):
         func_args = list(args_grouping)
         func_kwargs = {}
