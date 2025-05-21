@@ -360,7 +360,8 @@ def get_async_type(dep):
 def wrap(tag, code):
     if tag == "":
         return code
-    return "\\{}{{\n{}}}".format(tag, code)
+    # Use %-formatting for slightly faster string interpolation
+    return "\\%s{\n%s}" % (tag, code)
 
 
 def write_help_file(name, props, description, prefix, rpkg_data):
