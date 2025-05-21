@@ -710,45 +710,56 @@ def map_js_to_py_types_prop_types(type_object, indent_num):
 
 def map_js_to_py_types_flow_types(type_object):
     """Mapping from the Flow js types to the Python type."""
-    return dict(
-        array=lambda: "list",
-        boolean=lambda: "boolean",
-        number=lambda: "number",
-        string=lambda: "string",
-        Object=lambda: "dict",
-        any=lambda: "bool | number | str | dict | list",
-        Element=lambda: "dash component",
-        Node=lambda: "a list of or a singular dash component, string or number",
-        # React's PropTypes.oneOfType
-        union=lambda: " | ".join(
-            js_to_py_type(subType)
-            for subType in type_object["elements"]
-            if js_to_py_type(subType) != ""
-        ),
-        # Flow's Array type
-        Array=lambda: "list"
-        + (
-            f' of {js_to_py_type(type_object["elements"][0])}s'
-            if js_to_py_type(type_object["elements"][0]) != ""
-            else ""
-        ),
-        # React's PropTypes.shape
-        signature=lambda indent_num: (
-            "dict with keys:\n"
-            + "\n".join(
-                create_prop_docstring(
-                    prop_name=prop["key"],
-                    type_object=prop["value"],
-                    required=prop["value"]["required"],
-                    description=prop["value"].get("description", ""),
-                    default=prop.get("defaultValue"),
-                    indent_num=indent_num + 2,
-                    is_flow_type=True,
-                )
-                for prop in type_object["signature"]["properties"]
+
+    def map_union():
+        # cache js_to_py_type(subType) to prevent redundant evaluation
+        res = [
+            t
+            for t in (js_to_py_type(subType) for subType in type_object["elements"])
+            if t != ""
+        ]
+        return " | ".join(res)
+
+    def map_array():
+        elem_type = js_to_py_type(type_object["elements"][0])
+        if elem_type != "":
+            return f"list of {elem_type}s"
+        else:
+            return "list"
+
+    def map_signature(indent_num):
+        props = type_object["signature"]["properties"]
+        # Use list comprehension for faster join
+        lines = [
+            create_prop_docstring(
+                prop_name=prop["key"],
+                type_object=prop["value"],
+                required=prop["value"]["required"],
+                description=prop["value"].get("description", ""),
+                default=prop.get("defaultValue"),
+                indent_num=indent_num + 2,
+                is_flow_type=True,
             )
-        ),
-    )
+            for prop in props
+        ]
+        return "dict with keys:\n" + "\n".join(lines)
+
+    # Store the mapping as a local (static) dictionary
+    mapping = {
+        "array": lambda: "list",
+        "boolean": lambda: "boolean",
+        "number": lambda: "number",
+        "string": lambda: "string",
+        "Object": lambda: "dict",
+        "any": lambda: "bool | number | str | dict | list",
+        "Element": lambda: "dash component",
+        "Node": lambda: "a list of or a singular dash component, string or number",
+        "union": map_union,
+        "Array": map_array,
+        "signature": map_signature,
+    }
+
+    return mapping
 
 
 def js_to_py_type(type_object, is_flow_type=False, indent_num=0):
