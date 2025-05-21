@@ -157,8 +157,9 @@ def _parse_path_variables(pathname, path_template):
 
 
 def _create_redirect_function(redirect_to):
-    def redirect():
-        return flask.redirect(redirect_to, code=301)
+    # Use default argument to avoid re-creating the closure at call time
+    def redirect(_redirect_to=redirect_to):
+        return flask.redirect(_redirect_to, code=301)
 
     return redirect
 
