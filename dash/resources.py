@@ -38,8 +38,8 @@ class ResourceConfig:
 
 
 class Resources:
-    def __init__(self, resource_name: str, config: ResourceConfig):
-        self._resources: _t.List[ResourceType] = []
+    def __init__(self, resource_name: str, config: "ResourceConfig"):
+        self._resources: _t.List["ResourceType"] = []
         self.resource_name = resource_name
         self.config = config
 
@@ -131,9 +131,15 @@ class Resources:
         return self._filter_resources(all_resources, dev_bundles)
 
     def get_library_resources(self, libraries, dev_bundles=False):
+        # Obtain library resources as a single list instead of two-step concatenation
         lib_resources = ComponentRegistry.get_resources(self.resource_name, libraries)
-        all_resources = lib_resources + self._resources
-
+        if not lib_resources and not self._resources:
+            # Nothing to filter
+            return []
+        # Merge both lists directly (avoiding an intermediate variable if possible)
+        all_resources = lib_resources
+        if self._resources:
+            all_resources = lib_resources + self._resources
         return self._filter_resources(all_resources, dev_bundles)
 
 
@@ -154,6 +160,7 @@ class Css:
 
 class Scripts:
     def __init__(self, serve_locally, eager):
+        # Instantiate config and delegate to Resources
         self.config = ResourceConfig(serve_locally, eager)
         self._resources = Resources("_js_dist", self.config)
 
@@ -164,4 +171,5 @@ class Scripts:
         return self._resources.get_all_resources(dev_bundles)
 
     def get_library_scripts(self, libraries, dev_bundles=False):
+        # Directly delegate, no extra logic needed
         return self._resources.get_library_resources(libraries, dev_bundles)
