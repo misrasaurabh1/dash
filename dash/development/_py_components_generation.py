@@ -435,11 +435,13 @@ def parse_wildcards(props):
     list
         List of Dash valid wildcard prefixes
     """
-    list_of_valid_wildcard_attr_prefixes = []
-    for wildcard_attr in ["data-*", "aria-*"]:
-        if wildcard_attr in props:
-            list_of_valid_wildcard_attr_prefixes.append(wildcard_attr[:-1])
-    return list_of_valid_wildcard_attr_prefixes
+    # Directly check for presence and build the result list without a loop
+    result = []
+    if "data-*" in props:
+        result.append("data-")
+    if "aria-*" in props:
+        result.append("aria-")
+    return result
 
 
 def reorder_props(props):
