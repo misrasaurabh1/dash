@@ -62,7 +62,11 @@ def _infer_image(module):
 
 
 def _module_name_to_page_name(module_name):
-    return module_name.split(".")[-1].replace("_", " ").capitalize()
+    # Use rpartition('.') instead of split('.')[-1] for faster last section extraction
+    last_section = module_name.rpartition(".")[2]
+    # Avoid a chained call by using intermediate variable
+    last_section = last_section.replace("_", " ")
+    return last_section.capitalize()
 
 
 def _infer_path(module_name, template):
