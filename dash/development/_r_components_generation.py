@@ -924,17 +924,61 @@ def get_r_type(type_object, is_flow_type=False, indent_num=0):
     str
         Python type string
     """
-    js_type_name = type_object["name"]
-    js_to_r_types = get_r_prop_types(type_object=type_object)
-    if (
-        "computed" in type_object
-        and type_object["computed"]
-        or type_object.get("type", "") == "function"
-    ):
+    # Short-circuit for computed/type==function
+    if ("computed" in type_object and type_object["computed"]) or type_object.get(
+        "type", ""
+    ) == "function":
         return ""
-    if js_type_name in js_to_r_types:
-        prop_type = js_to_r_types[js_type_name]()
-        return prop_type
+    js_type_name = type_object["name"]
+
+    # Fast path for simple types
+    if js_type_name in _SIMPLE_TYPE_MAP:
+        return _SIMPLE_TYPE_MAP[js_type_name]()
+
+    # Handle enum
+    if js_type_name == "enum":
+        # React's PropTypes.oneOf
+        return "a value equal to: {}".format(
+            ", ".join(str(t["value"]) for t in type_object["value"])
+        )
+    # Handle union
+    if js_type_name == "union":
+        # React's PropTypes.oneOfType
+        # Avoid get_r_type lookup if type is ""
+        types_list = [
+            get_r_type(subType)
+            for subType in type_object["value"]
+            if get_r_type(subType) != ""
+        ]
+        return " | ".join(types_list)
+    # Handle arrayOf
+    if js_type_name == "arrayOf":
+        value_type = get_r_type(type_object["value"])
+        return "list" + (" of {}s".format(value_type) if value_type != "" else "")
+    # Handle objectOf
+    if js_type_name == "objectOf":
+        value_type = get_r_type(type_object["value"])
+        return "list with named elements and values of type {}".format(value_type)
+    # Handle shape and exact
+    if js_type_name in ("shape", "exact"):
+        # shape_or_exact from get_r_prop_types
+        value_items = type_object["value"]
+        keys_list = ", ".join("'{}'".format(t) for t in value_items)
+        # Use a list to accumulate and join only once
+        docstrings = []
+        for prop_name, prop in value_items.items():
+            docstrings.append(
+                create_prop_docstring_r(
+                    prop_name=prop_name,
+                    type_object=prop,
+                    required=prop["required"],
+                    description=prop.get("description", ""),
+                    indent_num=1,
+                )
+            )
+        return "lists containing elements {}.\nThose elements have the following types:\n{}".format(
+            keys_list, "\n".join(docstrings)
+        )
     return ""
 
 
@@ -1003,3 +1047,15 @@ def get_wildcards_r(prop_keys):
     if wildcards == "":
         wildcards = "NULL"
     return wildcards
+
+
+_SIMPLE_TYPE_MAP = {
+    "array": lambda: "unnamed list",
+    "bool": lambda: "logical",
+    "number": lambda: "numeric",
+    "string": lambda: "character",
+    "object": lambda: "named list",
+    "any": lambda: "logical | numeric | character | named list | unnamed list",
+    "element": lambda: "dash component",
+    "node": lambda: "a list of or a singular dash component, string or number",
+}
