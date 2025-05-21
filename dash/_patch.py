@@ -31,16 +31,14 @@ class Patch:
     ):
         if location is not None:
             self._location = location
+        elif parent is not None:
+            self._location = parent._location
         else:
-            # pylint: disable=consider-using-ternary
-            self._location = (parent and parent._location) or []
-        if parent is not None:
-            self._operations = parent._operations
-        else:
-            self._operations = []
+            self._location = []
+        self._operations = parent._operations if parent is not None else []
 
     def __getstate__(self):
-        return vars(self)
+        return self.__dict__
 
     def __setstate__(self, state):
         vars(self).update(state)
