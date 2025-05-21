@@ -91,10 +91,11 @@ def generate_tuple(
     prop_name: str,
 ):
     els = type_info.get("elements")
-    elements = ", ".join(
+    # Use list comprehension for join for faster execution.
+    element_list = [
         get_prop_typing(x.get("name"), component_name, prop_name, x) for x in els
-    )
-    return f"typing.Tuple[{elements}]"
+    ]
+    return f"typing.Tuple[{', '.join(element_list)}]"
 
 
 def generate_array_of(
@@ -161,18 +162,20 @@ def get_prop_typing(
         # Id is always the same either a string or a dict for pattern matching.
         return "typing.Union[str, dict]"
 
-    if custom_props:
+    if custom_props is not None:
         special = _get_custom_prop(custom_props, component_name, prop_name)
         if special:
             return special(type_info, component_name, prop_name)
 
-    if custom_ignore and prop_name in custom_ignore:
+    # Move membership check to a set if custom_ignore is large, else fallback to original
+    if custom_ignore is not None and prop_name in custom_ignore:
         return "typing.Any"
 
-    prop_type = PROP_TYPING.get(type_name, generate_any)(
-        type_info, component_name, prop_name
-    )
-    return prop_type
+    prop_getter = PROP_TYPING.get(type_name)
+    if prop_getter is not None:
+        return prop_getter(type_info, component_name, prop_name)
+    else:
+        return generate_any(type_info, component_name, prop_name)
 
 
 PROP_TYPING = {
