@@ -27,11 +27,11 @@ def has_context(func):
 
 
 def _get_context_value():
-    return context_value.get()
+    return _context_value_get()
 
 
 def _get_from_context(key, default):
-    return getattr(_get_context_value(), key, default)
+    return _getattr(_context_value_get(), key, default)
 
 
 class FalsyList(list):
@@ -321,3 +321,8 @@ def set_props(component_id: typing.Union[str, dict], props: dict):
     Set the props for a component not included in the callback outputs.
     """
     callback_context.set_props(component_id, props)
+
+
+_context_value_get = context_value.get
+
+_getattr = getattr
