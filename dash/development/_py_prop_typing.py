@@ -77,10 +77,13 @@ def generate_shape(type_info, component_name: str, prop_name: str):
 
 
 def generate_union(type_info, component_name: str, prop_name: str):
+    # Use a set for fast membership checking and a list to preserve order
+    types_set = set()
     types = []
     for union in type_info["value"]:
         u_type = get_prop_typing(union["name"], component_name, prop_name, union)
-        if u_type not in types:
+        if u_type not in types_set:
+            types_set.add(u_type)
             types.append(u_type)
     return f"typing.Union[{', '.join(types)}]"
 
