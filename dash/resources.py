@@ -38,8 +38,8 @@ class ResourceConfig:
 
 
 class Resources:
-    def __init__(self, resource_name: str, config: ResourceConfig):
-        self._resources: _t.List[ResourceType] = []
+    def __init__(self, resource_name: str, config: "ResourceConfig"):
+        self._resources: _t.List["ResourceType"] = []
         self.resource_name = resource_name
         self.config = config
 
@@ -125,8 +125,21 @@ class Resources:
         return filtered_resources
 
     def get_all_resources(self, dev_bundles=False):
-        lib_resources = ComponentRegistry.get_resources(self.resource_name)
-        all_resources = lib_resources + self._resources
+        # Fast lookup and cache: key on (resource_name, id of includes (usually None/constant))
+        cache_key = (self.resource_name, None)
+        lib_resources = _get_resources_cache.get(cache_key)
+        if lib_resources is None:
+            lib_resources = ComponentRegistry.get_resources(self.resource_name)
+            _get_resources_cache[cache_key] = lib_resources
+
+        # Avoid unnecessary list concat if either is empty (especially common in app startup)
+        if not lib_resources:
+            all_resources = self._resources
+        elif not self._resources:
+            all_resources = lib_resources
+        else:
+            # Only alloc new list if both non-empty
+            all_resources = lib_resources + self._resources
 
         return self._filter_resources(all_resources, dev_bundles)
 
@@ -146,6 +159,7 @@ class Css:
         self._resources.append_resource(stylesheet)
 
     def get_all_css(self):
+        # No optimization required here; kept as one-liner for directness
         return self._resources.get_all_resources()
 
     def get_library_css(self, libraries: _t.List[str]):
@@ -165,3 +179,6 @@ class Scripts:
 
     def get_library_scripts(self, libraries, dev_bundles=False):
         return self._resources.get_library_resources(libraries, dev_bundles)
+
+
+_get_resources_cache = {}
