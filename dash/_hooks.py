@@ -3,7 +3,6 @@ import typing as _t
 from importlib import metadata as _importlib_metadata
 
 import typing_extensions as _tx
-import flask as _f
 
 from .exceptions import HookError
 from .resources import ResourceType
@@ -49,11 +48,7 @@ class _Hooks:
         }
         self._js_dist = []
         self._css_dist = []
-        self._clientside_callbacks: _t.List[
-            _t.Tuple[ClientsideFuncType, _t.Any, _t.Any]
-        ] = []
-
-        # final hooks are a single hook added to the end of regular hooks.
+        self._clientside_callbacks = []
         self._finals = {}
 
     def add_hook(
@@ -122,15 +117,16 @@ class _Hooks:
         """
         Add a route to the Dash server.
         """
+        add_hook = self.add_hook  # Local name for faster access
 
-        def wrap(func: _t.Callable[[], _f.Response]):
+        def wrap(func):
             _name = name or func.__name__
-            self.add_hook(
+            add_hook(
                 "routes",
                 func,
                 priority=priority,
                 final=final,
-                data=dict(name=_name, methods=methods),
+                data={"name": _name, "methods": methods},
             )
             return func
 
