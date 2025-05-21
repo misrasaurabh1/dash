@@ -925,16 +925,14 @@ def get_r_type(type_object, is_flow_type=False, indent_num=0):
         Python type string
     """
     js_type_name = type_object["name"]
-    js_to_r_types = get_r_prop_types(type_object=type_object)
-    if (
-        "computed" in type_object
-        and type_object["computed"]
-        or type_object.get("type", "") == "function"
-    ):
+    # Fast checks first
+    if ("computed" in type_object and type_object["computed"]) or type_object.get(
+        "type", ""
+    ) == "function":
         return ""
-    if js_type_name in js_to_r_types:
-        prop_type = js_to_r_types[js_type_name]()
-        return prop_type
+    handler = _r_type_handlers.get(js_type_name)
+    if handler:
+        return handler(type_object)
     return ""
 
 
@@ -1003,3 +1001,72 @@ def get_wildcards_r(prop_keys):
     if wildcards == "":
         wildcards = "NULL"
     return wildcards
+
+
+def _get_r_type_enum(type_object):
+    # PropTypes.oneOf
+    return "a value equal to: {}".format(
+        ", ".join(str(t["value"]) for t in type_object["value"])
+    )
+
+
+def _get_r_type_union(type_object):
+    # PropTypes.oneOfType
+    results = []
+    for subType in type_object["value"]:
+        t = get_r_type(subType)
+        if t:
+            results.append(t)
+    return " | ".join(results)
+
+
+def _get_r_type_arrayOf(type_object):
+    # PropTypes.arrayOf
+    sub_type = get_r_type(type_object["value"])
+    if sub_type:
+        return "list of {}s".format(sub_type)
+    return "list"
+
+
+def _get_r_type_objectOf(type_object):
+    # PropTypes.objectOf
+    return "list with named elements and values of type {}".format(
+        get_r_type(type_object["value"])
+    )
+
+
+def _get_r_type_shape_or_exact(type_object):
+    # PropTypes.shape or exact
+    elem_types = ", ".join("'{}'".format(t) for t in type_object["value"])
+    docstrings = []
+    for prop_name, prop in type_object["value"].items():
+        docstrings.append(
+            create_prop_docstring_r(
+                prop_name=prop_name,
+                type_object=prop,
+                required=prop["required"],
+                description=prop.get("description", ""),
+                indent_num=1,
+            )
+        )
+    return "lists containing elements {}.\nThose elements have the following types:\n{}".format(
+        elem_types, "\n".join(docstrings)
+    )
+
+
+_r_type_handlers = {
+    "array": lambda type_object: "unnamed list",
+    "bool": lambda type_object: "logical",
+    "number": lambda type_object: "numeric",
+    "string": lambda type_object: "character",
+    "object": lambda type_object: "named list",
+    "any": lambda type_object: "logical | numeric | character | named list | unnamed list",
+    "element": lambda type_object: "dash component",
+    "node": lambda type_object: "a list of or a singular dash component, string or number",
+    "enum": _get_r_type_enum,
+    "union": _get_r_type_union,
+    "arrayOf": _get_r_type_arrayOf,
+    "objectOf": _get_r_type_objectOf,
+    "shape": _get_r_type_shape_or_exact,
+    "exact": _get_r_type_shape_or_exact,
+}
