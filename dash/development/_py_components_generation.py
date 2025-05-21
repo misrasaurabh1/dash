@@ -377,17 +377,17 @@ def create_docstring(
         Dash component docstring
     """
     # Ensure props are ordered with children first
-    props = (
-        props
-        if (
-            prop_reorder_exceptions is not None
-            and component_name in prop_reorder_exceptions
+    if not (
+        prop_reorder_exceptions is not None
+        and (
+            component_name in prop_reorder_exceptions
+            or "ALL" in prop_reorder_exceptions
         )
-        or (prop_reorder_exceptions is not None and "ALL" in prop_reorder_exceptions)
-        else reorder_props(props)
-    )
+    ):
+        props = reorder_props(props)
 
     n = "n" if component_name[0].lower() in "aeiou" else ""
+    filtered = filter_props(props, ignored_props)
     args = "\n".join(
         create_prop_docstring(
             prop_name=p,
@@ -398,9 +398,8 @@ def create_docstring(
             indent_num=0,
             is_flow_type="flowType" in prop and "type" not in prop,
         )
-        for p, prop in filter_props(props, ignored_props).items()
+        for p, prop in filtered.items()
     )
-
     return (
         f"A{n} {component_name} component.\n{description}\n\nKeyword arguments:\n{args}"
     )
@@ -454,13 +453,18 @@ def reorder_props(props):
     dict
         Dictionary with {propName: propMetadata} structure
     """
-
-    # Constructing an OrderedDict with duplicate keys, you get the order
-    # from the first one but the value from the last.
-    # Doing this to avoid mutating props, which can cause confusion.
-    props1 = [("children", "")] if "children" in props else []
-    props2 = [("id", "")] if "id" in props else []
-    return OrderedDict(props1 + props2 + sorted(list(props.items())))
+    # Avoid creating large intermediary lists, do key sorting directly
+    od = OrderedDict()
+    if "children" in props:
+        od["children"] = props["children"]
+    if "id" in props:
+        od["id"] = props["id"]
+    # Add everything else sorted but skip 'children' and 'id'
+    # Sorting only keys not already included
+    for k in sorted(props):
+        if k not in od:
+            od[k] = props[k]
+    return od
 
 
 def filter_props(props, ignored_props=tuple()):
@@ -505,29 +509,24 @@ def filter_props(props, ignored_props=tuple()):
     filtered_prop_args = filter_props(prop_args)
     ```
     """
-    filtered_props = copy.deepcopy(props)
-
-    for arg_name, arg in list(filtered_props.items()):
-        if arg_name in ignored_props or ("type" not in arg and "flowType" not in arg):
-            filtered_props.pop(arg_name)
+    # Avoid deepcopy and repeated pops—build new dict in one pass
+    filtered_props = {}
+    ignored_set = set(ignored_props)
+    # Local variable access is faster
+    for arg_name, arg in props.items():
+        if arg_name in ignored_set or ("type" not in arg and "flowType" not in arg):
             continue
-
-        # Filter out functions and instances --
-        # these cannot be passed from Python
-        if "type" in arg:  # These come from PropTypes
-            arg_type = arg["type"]["name"]
+        if "type" in arg:
+            arg_type = arg["type"].get("name")
             if arg_type in {"func", "symbol", "instanceOf"}:
-                filtered_props.pop(arg_name)
-        elif "flowType" in arg:  # These come from Flow & handled differently
-            arg_type_name = arg["flowType"]["name"]
+                continue
+        elif "flowType" in arg:
+            arg_type_name = arg["flowType"].get("name")
             if arg_type_name == "signature":
-                # This does the same as the PropTypes filter above, but "func"
-                # is under "type" if "name" is "signature" vs just in "name"
+                # Skip if not an object signature
                 if "type" not in arg["flowType"] or arg["flowType"]["type"] != "object":
-                    filtered_props.pop(arg_name)
-        else:
-            raise ValueError
-
+                    continue
+        filtered_props[arg_name] = arg
     return filtered_props
 
 
@@ -582,35 +581,40 @@ def create_prop_docstring(
     )
     indent_spacing = "  " * indent_num
 
-    default = default["value"] if default else ""
-    default = fix_keywords(default)
+    default_value = default["value"] if default else ""
+    default_value = fix_keywords(default_value)
 
-    is_required = "optional"
     if required:
         is_required = "required"
-    elif default and default not in ["None", "{}", "[]"]:
-        is_required = "default " + default.replace("\n", "")
+    elif default_value and default_value not in {"None", "{}", "[]"}:
+        is_required = "default " + default_value.replace("\n", "")
+    else:
+        is_required = "optional"
 
     # formats description
-    period = "." if description else ""
-    description = description.strip().strip(".").replace('"', r"\"") + period
+    if description:
+        desc_txt = description.strip().rstrip(".").replace('"', r"\"")
+        period = "."
+    else:
+        desc_txt = ""
+        period = ""
     desc_indent = indent_spacing + "    "
-    description = fill(
-        description,
-        initial_indent=desc_indent,
-        subsequent_indent=desc_indent,
-        break_long_words=False,
-        break_on_hyphens=False,
-    )
-    description = f"\n{description}" if description else ""
-    colon = ":" if description else ""
-    description = fix_keywords(description)
+    if desc_txt:
+        desc_filled = fill(
+            desc_txt + period,
+            initial_indent=desc_indent,
+            subsequent_indent=desc_indent,
+            break_long_words=False,
+            break_on_hyphens=False,
+        )
+        desc_filled = fix_keywords(f"\n{desc_filled}")
+        colon = ":"
+    else:
+        desc_filled = ""
+        colon = ""
 
     if "\n" in py_type_name:
-        # corrects the type
         dict_or_list = "list of dicts" if py_type_name.startswith("list") else "dict"
-
-        # format and rewrite the intro to the nested dicts
         intro1, intro2, dict_descr = py_type_name.partition("with keys:")
         intro = f"`{prop_name}` is a {intro1}{intro2}"
         intro = fill(
@@ -620,14 +624,11 @@ def create_prop_docstring(
             break_long_words=False,
             break_on_hyphens=False,
         )
-
-        # captures optional nested dict description and puts the "or" condition on a new line
         if "| dict with keys:" in dict_descr:
             dict_part1, dict_part2 = dict_descr.split(" |", 1)
             dict_part2 = "".join([desc_indent, "Or", dict_part2])
             dict_descr = f"{dict_part1}\n\n  {dict_part2}"
 
-        # ensures indent is correct if there is a second nested list of dicts
         current_indent = dict_descr.lstrip("\n").find("-")
         if current_indent == len(indent_spacing):
             dict_descr = "".join(
@@ -636,11 +637,11 @@ def create_prop_docstring(
 
         return (
             f"\n{indent_spacing}- {prop_name} ({dict_or_list}; {is_required}){colon}"
-            f"{description}"
+            f"{desc_filled}"
             f"\n\n{intro}{dict_descr}"
         )
     tn = f"{py_type_name}; " if py_type_name else ""
-    return f"\n{indent_spacing}- {prop_name} ({tn}{is_required}){colon}{description}"
+    return f"\n{indent_spacing}- {prop_name} ({tn}{is_required}){colon}{desc_filled}"
 
 
 def map_js_to_py_types_prop_types(type_object, indent_num):
