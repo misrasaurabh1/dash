@@ -455,12 +455,18 @@ def reorder_props(props):
         Dictionary with {propName: propMetadata} structure
     """
 
-    # Constructing an OrderedDict with duplicate keys, you get the order
-    # from the first one but the value from the last.
-    # Doing this to avoid mutating props, which can cause confusion.
-    props1 = [("children", "")] if "children" in props else []
-    props2 = [("id", "")] if "id" in props else []
-    return OrderedDict(props1 + props2 + sorted(list(props.items())))
+    od = OrderedDict()
+    # Add "children" if present
+    if "children" in props:
+        od["children"] = props["children"]
+    # Add "id" if present and not the same as "children"
+    if "id" in props:
+        od["id"] = props["id"]
+    # Add all other props, sorted, except "children" or "id"
+    for k in sorted(props):
+        if k != "children" and k != "id":
+            od[k] = props[k]
+    return od
 
 
 def filter_props(props, ignored_props=tuple()):
