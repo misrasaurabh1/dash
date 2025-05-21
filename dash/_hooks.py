@@ -52,8 +52,6 @@ class _Hooks:
         self._clientside_callbacks: _t.List[
             _t.Tuple[ClientsideFuncType, _t.Any, _t.Any]
         ] = []
-
-        # final hooks are a single hook added to the end of regular hooks.
         self._finals = {}
 
     def add_hook(
@@ -203,18 +201,21 @@ class _Hooks:
         The hook function takes the current context_value and before the ctx is set
         and has access to the flask request context.
         """
+        # Rather than create a new closure each time, curry all vars to the static helper
+        return lambda func: self._wrap_add_hook(
+            self, "custom_data", namespace, priority, final, func
+        )
 
-        def wrap(func: _t.Callable[[_t.Dict], _t.Any]):
-            self.add_hook(
-                "custom_data",
-                func,
-                priority=priority,
-                final=final,
-                data={"namespace": namespace},
-            )
-            return func
-
-        return wrap
+    @staticmethod
+    def _wrap_add_hook(self_ref, hooktype, namespace, priority, final, func):
+        self_ref.add_hook(
+            hooktype,
+            func,
+            priority=priority,
+            final=final,
+            data={"namespace": namespace},
+        )
+        return func
 
 
 hooks = _Hooks()
