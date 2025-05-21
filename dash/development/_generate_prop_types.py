@@ -45,7 +45,9 @@ def generate_type(type_name):
 
 
 def generate_union(prop_info):
-    types = [generate_prop_type(t) for t in prop_info["value"]]
+    # flatten local vars for performance
+    prop_types_local = prop_types
+    types = [prop_types_local[t["name"]](t) for t in prop_info["value"]]
     return f"pt.oneOfType([{','.join(types)}])"
 
 
