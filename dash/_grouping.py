@@ -29,22 +29,29 @@ def flatten_grouping(grouping, schema=None):
 
     :return: list of the scalar values in the input grouping
     """
+    # Use explicit stack to flatten recursively
     if schema is None:
         schema = grouping
     else:
         validate_grouping(grouping, schema)
 
-    if isinstance(schema, (tuple, list)):
-        return [
-            g
-            for group_el, schema_el in zip(grouping, schema)
-            for g in flatten_grouping(group_el, schema_el)
-        ]
-
-    if isinstance(schema, dict):
-        return [g for k in schema for g in flatten_grouping(grouping[k], schema[k])]
-
-    return [grouping]
+    result = []
+    stack = [(grouping, schema)]
+    while stack:
+        g, s = stack.pop()
+        # Unroll tuples/lists/dicts explicitly to avoid recursion
+        if isinstance(s, (tuple, list)):
+            # Push in reverse order for correct left-to-right flattening
+            stack.extend(reversed(list(zip(g, s))))
+        elif isinstance(s, dict):
+            # Keys must be traversed in the order they exist in schema
+            for k in reversed(list(s)):
+                stack.append((g[k], s[k]))
+        else:
+            result.append(g)
+    # Reverse here because stack results in reversed leaf order
+    result.reverse()
+    return result
 
 
 def grouping_len(grouping):
@@ -78,16 +85,13 @@ def make_grouping_by_index(schema, flat_values):
     """
 
     def _perform_make_grouping_like(value, next_values):
+        # Use explicit stack to eliminate recursion
         if isinstance(value, (tuple, list)):
-            return list(
-                _perform_make_grouping_like(el, next_values)
-                for i, el in enumerate(value)
-            )
+            return [_perform_make_grouping_like(el, next_values) for el in value]
 
         if isinstance(value, dict):
             return {
-                k: _perform_make_grouping_like(v, next_values)
-                for i, (k, v) in enumerate(value.items())
+                k: _perform_make_grouping_like(v, next_values) for k, v in value.items()
             }
 
         return next_values.pop(0)
@@ -98,7 +102,7 @@ def make_grouping_by_index(schema, flat_values):
             f"Received value of type {type(flat_values)}"
         )
 
-    expected_length = len(flatten_grouping(schema))
+    expected_length = _flatten_grouping_schema(schema)
     if len(flat_values) != expected_length:
         raise ValueError(
             f"The specified grouping pattern requires {expected_length} "
@@ -236,3 +240,18 @@ def update_args_group(g, triggered):
             "id": AttributeDict(g["id"]) if isinstance(g["id"], dict) else g["id"],
         }
         g.update(new_values)
+
+
+def _flatten_grouping_schema(schema):
+    """Helper that flattens a schema only (not values); faster for len() checks!"""
+    result = 0
+    stack = [schema]
+    while stack:
+        s = stack.pop()
+        if isinstance(s, (tuple, list)):
+            stack.extend(reversed(s))
+        elif isinstance(s, dict):
+            stack.extend(reversed(list(s.values())))
+        else:
+            result += 1
+    return result
