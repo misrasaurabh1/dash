@@ -505,29 +505,29 @@ def filter_props(props, ignored_props=tuple()):
     filtered_prop_args = filter_props(prop_args)
     ```
     """
-    filtered_props = copy.deepcopy(props)
-
-    for arg_name, arg in list(filtered_props.items()):
-        if arg_name in ignored_props or ("type" not in arg and "flowType" not in arg):
-            filtered_props.pop(arg_name)
+    filtered_props = {}
+    for arg_name, arg in props.items():
+        if arg_name in ignored_props:
+            continue
+        has_type = "type" in arg
+        has_flowType = "flowType" in arg
+        if not (has_type or has_flowType):
             continue
 
         # Filter out functions and instances --
-        # these cannot be passed from Python
-        if "type" in arg:  # These come from PropTypes
+        if has_type:  # These come from PropTypes
             arg_type = arg["type"]["name"]
             if arg_type in {"func", "symbol", "instanceOf"}:
-                filtered_props.pop(arg_name)
-        elif "flowType" in arg:  # These come from Flow & handled differently
+                continue
+        elif has_flowType:  # These come from Flow & handled differently
             arg_type_name = arg["flowType"]["name"]
             if arg_type_name == "signature":
-                # This does the same as the PropTypes filter above, but "func"
-                # is under "type" if "name" is "signature" vs just in "name"
                 if "type" not in arg["flowType"] or arg["flowType"]["type"] != "object":
-                    filtered_props.pop(arg_name)
+                    continue
         else:
             raise ValueError
 
+        filtered_props[arg_name] = arg
     return filtered_props
 
 
