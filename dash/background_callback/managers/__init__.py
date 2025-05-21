@@ -1,6 +1,8 @@
 from abc import ABC
 import inspect
 import hashlib
+import pickle
+from functools import lru_cache
 
 
 class BaseBackgroundCallbackManager(ABC):
@@ -13,19 +15,20 @@ class BaseBackgroundCallbackManager(ABC):
     functions = []
 
     def __init__(self, cache_by):
+        # Convert cache_by to list only once if necessary
         if cache_by is not None and not isinstance(cache_by, list):
             cache_by = [cache_by]
-
         self.cache_by = cache_by
 
+        # Don't lookup each time
         BaseBackgroundCallbackManager.managers.append(self)
-
         self.func_registry = {}
 
-        # Register all funcs that were added before instantiation.
-        # Ensure all celery task are registered.
-        for fdetails in self.functions:
-            self.register(*fdetails)
+        # Local ref for hot path
+        functions = self.functions
+        register = self.register
+        for fdetails in functions:
+            register(*fdetails)
 
     def terminate_job(self, job):
         raise NotImplementedError
@@ -55,28 +58,40 @@ class BaseBackgroundCallbackManager(ABC):
         raise NotImplementedError
 
     def build_cache_key(self, fn, args, cache_args_to_ignore, triggered):
-        fn_source = inspect.getsource(fn)
+        # Get the function source (cached)
+        fn_source = self._get_fn_source_cached(fn)
 
+        # Normalize cache_args_to_ignore to tuple to avoid repeated isinstance
         if not isinstance(cache_args_to_ignore, (list, tuple)):
-            cache_args_to_ignore = [cache_args_to_ignore]
+            cache_args_to_ignore = (cache_args_to_ignore,)
+        else:
+            cache_args_to_ignore = tuple(cache_args_to_ignore)
+        args_result = args
 
         if cache_args_to_ignore:
+            # Fast-path: don't filter if nothing to ignore
             if isinstance(args, dict):
-                args = {k: v for k, v in args.items() if k not in cache_args_to_ignore}
+                ignore_set = set(cache_args_to_ignore)
+                args_result = {k: v for k, v in args.items() if k not in ignore_set}
             else:
-                args = [
-                    arg for i, arg in enumerate(args) if i not in cache_args_to_ignore
-                ]
+                ignore_idx = set(cache_args_to_ignore)
+                args_result = [arg for i, arg in enumerate(args) if i not in ignore_idx]
 
-        hash_dict = dict(args=args, fn_source=fn_source, triggered=triggered)
+        hash_dict = {
+            "args": args_result,
+            "fn_source": fn_source,
+            "triggered": triggered,
+        }
 
-        if self.cache_by is not None:
-            # Caching enabled
-            for i, cache_item in enumerate(self.cache_by):
-                # Call cache function
+        cache_by = self.cache_by
+        if cache_by:
+            for i, cache_item in enumerate(cache_by):
+                # Caching enabled, call cache function only as needed
                 hash_dict[f"cache_key_{i}"] = cache_item()
 
-        return hashlib.sha256(str(hash_dict).encode("utf-8")).hexdigest()
+        # Use pickle for deterministic, robust byte serialization (faster than str(dict).encode)
+        key_bytes = pickle.dumps(hash_dict, protocol=pickle.HIGHEST_PROTOCOL)
+        return hashlib.sha256(key_bytes).hexdigest()
 
     def register(self, key, fn, progress):
         self.func_registry[key] = self.make_job_fn(fn, progress, key)
@@ -115,3 +130,8 @@ class BaseBackgroundCallbackManager(ABC):
         return hashlib.sha256(
             callback_id.encode("utf-8") + fn_str.encode("utf-8")
         ).hexdigest()
+
+    @staticmethod
+    @lru_cache(maxsize=128)
+    def _get_fn_source_cached(fn):
+        return inspect.getsource(fn)
