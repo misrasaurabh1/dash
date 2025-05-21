@@ -138,9 +138,10 @@ class _Hooks:
 
     def error(self, priority: _t.Optional[int] = None, final: bool = False):
         """Automatically add an error handler to the dash app."""
+        add = self.add_hook  # localize for speed
 
-        def _error(func: _t.Callable[[Exception], _t.Any]):
-            self.add_hook("error", func, priority=priority, final=final)
+        def _error(func):
+            add("error", func, priority=priority, final=final)
             return func
 
         return _error
