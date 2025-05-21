@@ -63,25 +63,25 @@ def _custom_formatargvalues(
     formatvarkw=lambda name: "**" + name,
     formatvalue=lambda value: "=" + repr(value),
 ):
-
     """Copied from inspect.formatargvalues, modified to place function
     arguments on separate lines"""
 
-    # pylint: disable=W0622
-    def convert(name, locals=locals, formatarg=formatarg, formatvalue=formatvalue):
-        return formatarg(name) + formatvalue(locals[name])
+    # Minor optimization: local variables for heavily-used callables
+    _locals = locals
+    _formatarg = formatarg
+    _formatvalue = formatvalue
 
-    specs = []
+    # Inline the convert function and avoid extra function call and locals lookup cost
+    specs = [_formatarg(name) + _formatvalue(_locals[name]) for name in args]
 
-    # pylint: disable=C0200
-    for i in range(len(args)):
-        specs.append(convert(args[i]))
     if varargs:
-        specs.append(formatvarargs(varargs) + formatvalue(locals[varargs]))
+        specs.append(formatvarargs(varargs) + formatvalue(_locals[varargs]))
     if varkw:
-        specs.append(formatvarkw(varkw) + formatvalue(locals[varkw]))
+        specs.append(formatvarkw(varkw) + formatvalue(_locals[varkw]))
 
-    result = "(" + ", ".join(specs) + ")"
+    # Precalculate joined result
+    joined = ", ".join(specs)
+    result = f"({joined})"
 
     if len(result) < 40:
         return result
