@@ -38,6 +38,7 @@ class _Hook(_tx.Generic[HookDataType]):
 
 class _Hooks:
     def __init__(self) -> None:
+        # Use lists in ns directly without copying on get
         self._ns = {
             "setup": [],
             "layout": [],
@@ -53,7 +54,6 @@ class _Hooks:
             _t.Tuple[ClientsideFuncType, _t.Any, _t.Any]
         ] = []
 
-        # final hooks are a single hook added to the end of regular hooks.
         self._finals = {}
 
     def add_hook(
@@ -65,21 +65,42 @@ class _Hooks:
         data: _t.Optional[HookDataType] = None,
     ):
         if final:
-            existing = self._finals.get(hook)
-            if existing:
+            if hook in self._finals:
                 raise HookError("Final hook already present")
             self._finals[hook] = _Hook(func, final, data=data)
             return
-        hks = self._ns.get(hook, [])
 
-        p = priority or 0
-        if not priority and len(hks):
-            # Take the minimum value and remove 1 to keep the order.
-            priority_min = min(h.priority for h in hks)
-            p = priority_min - 1
+        # Always get the actual list (never default).
+        try:
+            hks = self._ns[hook]
+        except KeyError:
+            hks = []
+            self._ns[hook] = hks
 
-        hks.append(_Hook(func, priority=p, data=data))
-        self._ns[hook] = sorted(hks, reverse=True, key=lambda h: h.priority)
+        if priority is None:
+            if hks:
+                # Priority: 1 smaller than current minimum in hks
+                min_priority = hks[
+                    -1
+                ].priority  # last element: lowest, list is sorted desc
+                p = min_priority - 1
+            else:
+                p = 0
+        else:
+            p = priority
+
+        # Keep hks sorted in descending priority during insert using bisect
+        new_hook = _Hook(func, priority=p, data=data)
+        # _Hook instances are sorted by priority descending,
+        # so we insert at proper position (use a wrapper of bisect, since descending):
+        left, right = 0, len(hks)
+        while left < right:
+            mid = (left + right) // 2
+            if hks[mid].priority > p:
+                left = mid + 1
+            else:
+                right = mid
+        hks.insert(left, new_hook)
 
     def get_hooks(self, hook: str) -> _t.List[_Hook]:
         final = self._finals.get(hook, None)
