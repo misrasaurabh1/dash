@@ -56,12 +56,11 @@ def grouping_len(grouping):
     :param grouping: The grouping value to calculate the length of
     :return: non-negative integer
     """
-    if isinstance(grouping, (tuple, list)):
-        return sum([grouping_len(group_el) for group_el in grouping])
-
-    if isinstance(grouping, dict):
-        return sum([grouping_len(group_el) for group_el in grouping.values()])
-
+    grouping_type = type(grouping)
+    if grouping_type is tuple or grouping_type is list:
+        return sum(grouping_len(group_el) for group_el in grouping)
+    elif grouping_type is dict:
+        return sum(grouping_len(group_el) for group_el in grouping.values())
     return 1
 
 
@@ -120,12 +119,11 @@ def map_grouping(fn, grouping):
     :return: A new grouping with the same structure as input grouping with scalar
         values updated by the input function.
     """
-    if isinstance(grouping, (tuple, list)):
+    grouping_type = type(grouping)
+    if grouping_type is tuple or grouping_type is list:
         return [map_grouping(fn, g) for g in grouping]
-
-    if isinstance(grouping, dict):
+    elif grouping_type is dict:
         return AttributeDict({k: map_grouping(fn, g) for k, g in grouping.items()})
-
     return fn(grouping)
 
 
