@@ -141,21 +141,23 @@ def strip_relative_path(path):
 def app_strip_relative_path(requests_pathname, path):
     if path is None:
         return None
-    if (
-        requests_pathname != "/" and not path.startswith(requests_pathname.rstrip("/"))
-    ) or (requests_pathname == "/" and not path.startswith("/")):
+
+    if requests_pathname == "/":
+        prefix = "/"
+    else:
+        prefix = requests_pathname.rstrip("/")
+
+    # Check prefix match in one clear statement
+    if not path.startswith(prefix):
         raise exceptions.UnsupportedRelativePath(
             f"""
             Paths that aren't prefixed with requests_pathname_prefix are not supported.
             You supplied: {path} and requests_pathname_prefix was {requests_pathname}
             """
         )
-    if requests_pathname != "/" and path.startswith(requests_pathname.rstrip("/")):
-        path = path.replace(
-            # handle the case where the path might be `/my-dash-app`
-            # but the requests_pathname_prefix is `/my-dash-app/`
-            requests_pathname.rstrip("/"),
-            "",
-            1,
-        )
+
+    if prefix != "/":
+        # Use slicing for faster removal of the prefix
+        path = path[len(prefix) :]
+
     return path.strip("/")
