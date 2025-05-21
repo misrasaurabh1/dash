@@ -759,7 +759,7 @@ def generate_exports(
     package_depends,
     package_imports,
     package_suggests,
-    **kwargs
+    **kwargs,
 ):
     export_string = make_namespace_exports(components, prefix)
 
@@ -997,9 +997,8 @@ def create_prop_docstring_r(
 
 
 def get_wildcards_r(prop_keys):
-    wildcards = ""
-    wildcards += ", ".join("'{}'".format(p) for p in prop_keys if p.endswith("-*"))
-
-    if wildcards == "":
-        wildcards = "NULL"
-    return wildcards
+    # Collect matches with a list comprehension and join only when needed
+    matching = [f"'{p}'" for p in prop_keys if p.endswith("-*")]
+    if not matching:
+        return "NULL"
+    return ", ".join(matching)
