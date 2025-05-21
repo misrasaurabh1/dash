@@ -352,7 +352,8 @@ def required_props(props):
     list
         List of prop names (str) that are required for the Component
     """
-    return [prop_name for prop_name, prop in list(props.items()) if prop["required"]]
+    # Avoid unnecessary list(props.items()) by iterating directly over dict.items()
+    return [prop_name for prop_name, prop in props.items() if prop["required"]]
 
 
 def create_docstring(
