@@ -14,6 +14,7 @@ from typing import Optional
 from typing_extensions import Literal
 
 from werkzeug.serving import make_server
+from IPython import get_ipython
 
 
 try:
@@ -215,16 +216,22 @@ class JupyterDash:
             @_dash_comm.on_msg
             def _receive_message(msg):
                 prev_parent = _caller.get("parent")
-                if prev_parent and prev_parent != _dash_comm.kernel.get_parent():
-                    _dash_comm.kernel.set_parent(
-                        [prev_parent["header"]["session"]], prev_parent
-                    )
-                    del _caller["parent"]
+                # Only access .kernel and .get_parent() once if needed
+                if prev_parent is not None:
+                    curr_parent = _dash_comm.kernel.get_parent()
+                    if prev_parent != curr_parent:
+                        _dash_comm.kernel.set_parent(
+                            [prev_parent["header"]["session"]], prev_parent
+                        )
+                        del _caller["parent"]
 
-                msg_data = msg.get("content").get("data")
-                msg_type = msg_data.get("type", None)
-                if msg_type == "base_url_response":
-                    _jupyter_config.update(msg_data)
+                # Fast local access to nested dicts
+                msg_content = msg.get("content")
+                if msg_content is not None:
+                    msg_data = msg_content.get("data")
+                    if msg_data is not None:
+                        if msg_data.get("type") == "base_url_response":
+                            _jupyter_config.update(msg_data)
 
     # pylint: disable=too-many-locals, too-many-branches, too-many-statements
     def run_app(
