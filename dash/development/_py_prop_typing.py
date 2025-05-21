@@ -109,9 +109,9 @@ def generate_array_of(
 
 
 def generate_object_of(type_info, component_name: str, prop_name: str):
-    typed = get_prop_typing(
-        type_info["value"]["name"], component_name, prop_name, type_info["value"]
-    )
+    # Directly access nested keys for efficiency
+    value = type_info["value"]
+    typed = get_prop_typing(value["name"], component_name, prop_name, value)
     return f"typing.Dict[typing.Union[str, float, int], {typed}]"
 
 
@@ -161,18 +161,23 @@ def get_prop_typing(
         # Id is always the same either a string or a dict for pattern matching.
         return "typing.Union[str, dict]"
 
-    if custom_props:
+    # Fast path for custom_props present and _get_custom_prop returns a callable
+    if custom_props is not None:
         special = _get_custom_prop(custom_props, component_name, prop_name)
         if special:
             return special(type_info, component_name, prop_name)
 
-    if custom_ignore and prop_name in custom_ignore:
+    # Slightly faster set check for ignore
+    if custom_ignore is not None and prop_name in custom_ignore:
         return "typing.Any"
 
-    prop_type = PROP_TYPING.get(type_name, generate_any)(
-        type_info, component_name, prop_name
-    )
-    return prop_type
+    # Inline lookup for prop typing (avoid extra variable, single branch)
+    prop_type_fn = PROP_TYPING.get(type_name)
+    if prop_type_fn is not None:
+        return prop_type_fn(type_info, component_name, prop_name)
+    else:
+        # Fallback for unknown type name
+        return generate_any(type_info, component_name, prop_name)
 
 
 PROP_TYPING = {
