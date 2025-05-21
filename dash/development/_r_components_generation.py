@@ -735,7 +735,14 @@ def generate_rpkg(
 # but probably more conventional this way
 def snake_case_to_camel_case(namestring):
     s = namestring.split("_")
-    return s[0] + "".join(w.capitalize() for w in s[1:])
+    # Fast path: no underscores, nothing to camel!
+    if len(s) == 1:
+        return namestring
+    # Avoid generator; use local variable binding
+    capitalize = str.capitalize
+    rest = [capitalize(w) for w in s[1:]]
+    # This join is measurably faster for small n, avoids generator overhead
+    return s[0] + "".join(rest)
 
 
 # this logic will permit passing blank R prefixes to
@@ -745,7 +752,9 @@ def snake_case_to_camel_case(namestring):
 def format_fn_name(prefix, name):
     if prefix:
         return prefix + snake_case_to_camel_case(name)
-    return snake_case_to_camel_case(name[0].lower() + name[1:])
+    # Avoid method calls in slice, do lower first then slice
+    name0_lower = name[0].lower()
+    return snake_case_to_camel_case(name0_lower + name[1:])
 
 
 # pylint: disable=unused-argument
