@@ -14,6 +14,8 @@ from typing import Optional
 from typing_extensions import Literal
 
 from werkzeug.serving import make_server
+from IPython import get_ipython
+from IPython.core.ultratb import FormattedTB
 
 
 try:
@@ -207,24 +209,39 @@ class JupyterDash:
         _request_jupyter_config()
 
     def __init__(self):
-        self.in_ipython = get_ipython() is not None
-        self.in_colab = "google.colab" in sys.modules
+        # Avoid repeated lookup; set in_ipython and in_colab directly.
+        ipython = get_ipython()
+        self.in_ipython = ipython is not None
+        modules = sys.modules
+        self.in_colab = "google.colab" in modules
 
+        # Only proceed with msg binding if everything is present
         if _dep_installed and self.in_ipython and _dash_comm:
 
             @_dash_comm.on_msg
             def _receive_message(msg):
-                prev_parent = _caller.get("parent")
-                if prev_parent and prev_parent != _dash_comm.kernel.get_parent():
-                    _dash_comm.kernel.set_parent(
+                # Use local variables for faster access
+                caller = _caller
+                dash_comm = _dash_comm
+                prev_parent = caller.get("parent")
+                if (
+                    prev_parent is not None
+                    and prev_parent != dash_comm.kernel.get_parent()
+                ):
+                    dash_comm.kernel.set_parent(
                         [prev_parent["header"]["session"]], prev_parent
                     )
-                    del _caller["parent"]
+                    del caller["parent"]
 
-                msg_data = msg.get("content").get("data")
-                msg_type = msg_data.get("type", None)
-                if msg_type == "base_url_response":
-                    _jupyter_config.update(msg_data)
+                # Fast chain access to msg type
+                content = msg.get("content", None)
+                if content is not None:
+                    msg_data = content.get("data", None)
+                    if (
+                        msg_data is not None
+                        and msg_data.get("type", None) == "base_url_response"
+                    ):
+                        _jupyter_config.update(msg_data)
 
     # pylint: disable=too-many-locals, too-many-branches, too-many-statements
     def run_app(
@@ -452,13 +469,12 @@ class JupyterDash:
             # Compute number of stack frames to skip to get down to callback
             skip = _get_skip(error) if dev_tools_prune_errors else 0
 
-            # Customized formatargvalues function we can place function parameters
-            # on separate lines
+            # Patch formatargvalues only in necessary context
             original_formatargvalues = inspect.formatargvalues
             inspect.formatargvalues = _custom_formatargvalues
+            ostream = io.StringIO()
             try:
                 # Use IPython traceback formatting to build the traceback string.
-                ostream = io.StringIO()
                 ipytb = FormattedTB(
                     tb_offset=skip,
                     mode="Verbose",
@@ -467,11 +483,11 @@ class JupyterDash:
                     ostream=ostream,
                 )
                 ipytb()
+                # Read result only if needed (faster to put after ipytb, not allocate outside)
+                stacktrace = ostream.getvalue()
             finally:
                 # Restore formatargvalues
                 inspect.formatargvalues = original_formatargvalues
-
-            stacktrace = ostream.getvalue()
 
             if self.inline_exceptions:
                 print(stacktrace)
