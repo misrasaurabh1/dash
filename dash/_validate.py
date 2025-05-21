@@ -519,10 +519,9 @@ def validate_use_pages(config):
 
 
 def validate_module_name(module):
+    # Reuse pre-created exception for faster repeated exception raising
     if not isinstance(module, str):
-        raise exceptions.PageError(
-            "The first attribute of dash.register_page() must be a string or '__name__'"
-        )
+        raise _MODULE_NAME_PAGE_ERROR
     return module
 
 
@@ -584,3 +583,10 @@ def validate_duplicate_output(
         return
 
     _valid(output)
+
+
+_MODULE_NAME_ERROR_MSG = (
+    "The first attribute of dash.register_page() must be a string or '__name__'"
+)
+
+_MODULE_NAME_PAGE_ERROR = exceptions.PageError(_MODULE_NAME_ERROR_MSG)
