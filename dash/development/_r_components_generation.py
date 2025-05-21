@@ -759,7 +759,7 @@ def generate_exports(
     package_depends,
     package_imports,
     package_suggests,
-    **kwargs
+    **kwargs,
 ):
     export_string = make_namespace_exports(components, prefix)
 
@@ -850,63 +850,32 @@ def make_namespace_exports(components, prefix):
 
 def get_r_prop_types(type_object):
     """Mapping from the PropTypes js type object to the R type."""
+    # Only create the mapping needed for the current type_object
+    js_type_name = type_object.get("name")
 
-    def shape_or_exact():
-        return "lists containing elements {}.\n{}".format(
-            ", ".join("'{}'".format(t) for t in type_object["value"]),
-            "Those elements have the following types:\n{}".format(
-                "\n".join(
-                    create_prop_docstring_r(
-                        prop_name=prop_name,
-                        type_object=prop,
-                        required=prop["required"],
-                        description=prop.get("description", ""),
-                        indent_num=1,
-                    )
-                    for prop_name, prop in type_object["value"].items()
-                )
-            ),
-        )
+    # Fast path for simple types
+    if js_type_name in _SIMPLE_R_TYPES:
+        return _SIMPLE_R_TYPES
 
-    return dict(
-        array=lambda: "unnamed list",
-        bool=lambda: "logical",
-        number=lambda: "numeric",
-        string=lambda: "character",
-        object=lambda: "named list",
-        any=lambda: "logical | numeric | character | named list | unnamed list",
-        element=lambda: "dash component",
-        node=lambda: "a list of or a singular dash component, string or number",
-        # React's PropTypes.oneOf
-        enum=lambda: "a value equal to: {}".format(
-            ", ".join("{}".format(str(t["value"])) for t in type_object["value"])
-        ),
-        # React's PropTypes.oneOfType
-        union=lambda: "{}".format(
-            " | ".join(
-                "{}".format(get_r_type(subType))
-                for subType in type_object["value"]
-                if get_r_type(subType) != ""
-            )
-        ),
-        # React's PropTypes.arrayOf
-        arrayOf=lambda: (
-            "list"
-            + (
-                " of {}s".format(get_r_type(type_object["value"]))
-                if get_r_type(type_object["value"]) != ""
-                else ""
-            )
-        ),
-        # React's PropTypes.objectOf
-        objectOf=lambda: "list with named elements and values of type {}".format(
-            get_r_type(type_object["value"])
-        ),
-        # React's PropTypes.shape
-        shape=shape_or_exact,
-        # React's PropTypes.exact
-        exact=shape_or_exact,
-    )
+    # Only create lambdas for necessary composite/custom prop type keys
+    mapping = {}
+    if js_type_name == "enum":
+        mapping["enum"] = lambda: _enum_type(type_object)
+    elif js_type_name == "union":
+        mapping["union"] = lambda: _union_type(type_object)
+    elif js_type_name == "arrayOf":
+        mapping["arrayOf"] = lambda: _arrayOf_type(type_object)
+    elif js_type_name == "objectOf":
+        mapping["objectOf"] = lambda: _objectOf_type(type_object)
+    elif js_type_name == "shape":
+        mapping["shape"] = lambda: _shape_or_exact(type_object)
+    elif js_type_name == "exact":
+        mapping["exact"] = lambda: _shape_or_exact(type_object)
+
+    # Return the mapping for the requested type (still compatible with the original code)
+    # For composite types, call by `mapping[js_type_name]()`
+    # For simple types, call by `_SIMPLE_R_TYPES[js_type_name]`
+    return mapping
 
 
 def get_r_type(type_object, is_flow_type=False, indent_num=0):
@@ -925,16 +894,26 @@ def get_r_type(type_object, is_flow_type=False, indent_num=0):
         Python type string
     """
     js_type_name = type_object["name"]
-    js_to_r_types = get_r_prop_types(type_object=type_object)
+
+    # Early-out for function/computed (same as before)
     if (
         "computed" in type_object
         and type_object["computed"]
         or type_object.get("type", "") == "function"
     ):
         return ""
-    if js_type_name in js_to_r_types:
-        prop_type = js_to_r_types[js_type_name]()
-        return prop_type
+
+    # Use optimized fast lookup for simple types
+    if js_type_name in _SIMPLE_R_TYPES:
+        return _SIMPLE_R_TYPES[js_type_name]
+
+    # For composite/custom type keys
+    mapping = get_r_prop_types(type_object)
+    func = mapping.get(js_type_name)
+    if func:
+        return func()
+
+    # Fallback: unknown type returns ""
     return ""
 
 
@@ -1003,3 +982,63 @@ def get_wildcards_r(prop_keys):
     if wildcards == "":
         wildcards = "NULL"
     return wildcards
+
+
+def _shape_or_exact(type_object):
+    value = type_object["value"]
+    keys_joined = ", ".join("'{}'".format(t) for t in value)
+    docstrings = []
+    for prop_name, prop in value.items():
+        docstrings.append(
+            create_prop_docstring_r(
+                prop_name=prop_name,
+                type_object=prop,
+                required=prop["required"],
+                description=prop.get("description", ""),
+                indent_num=1,
+            )
+        )
+    return (
+        f"lists containing elements {keys_joined}.\n"
+        f"Those elements have the following types:\n" + "\n".join(docstrings)
+    )
+
+
+def _enum_type(type_object):
+    return "a value equal to: " + ", ".join(
+        str(t["value"]) for t in type_object["value"]
+    )
+
+
+def _union_type(type_object):
+    parts = []
+    for subType in type_object["value"]:
+        r_type = get_r_type(subType)
+        if r_type:
+            parts.append(r_type)
+    return " | ".join(parts)
+
+
+def _arrayOf_type(type_object):
+    vtype = get_r_type(type_object["value"])
+    if vtype:
+        return f"list of {vtype}s"
+    else:
+        return "list"
+
+
+def _objectOf_type(type_object):
+    vtype = get_r_type(type_object["value"])
+    return f"list with named elements and values of type {vtype}"
+
+
+_SIMPLE_R_TYPES = {
+    "array": "unnamed list",
+    "bool": "logical",
+    "number": "numeric",
+    "string": "character",
+    "object": "named list",
+    "any": "logical | numeric | character | named list | unnamed list",
+    "element": "dash component",
+    "node": "a list of or a singular dash component, string or number",
+}
