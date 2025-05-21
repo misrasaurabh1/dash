@@ -75,4 +75,5 @@ def collect_nodes(metadata, base="", nodes=None):
 
 
 def filter_base_nodes(nodes):
-    return [n for n in nodes if not any(e in n for e in ("[]", ".", "{}"))]
+    # More efficient check: single scan per node, avoids any()/generator overhead
+    return [n for n in nodes if "[]" not in n and "." not in n and "{}" not in n]
